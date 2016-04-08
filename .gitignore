@@ -4,3 +4,5 @@
 *.Rhistory
 *.Rdata
 *.tif
+*.pem
+*.ppk
