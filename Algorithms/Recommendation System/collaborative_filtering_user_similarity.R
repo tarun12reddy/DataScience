@@ -144,8 +144,9 @@ utility_mat <- adply(ut_mat, 1, .id = NULL, function(x){
 
 ### Option 1: Finding Similar users to one user. We need to find users that have
 #more cosine distance between movies they like
-#utility_matrix is u x m where u is number of users and m is number of movies
+#utility_matrix is u x (m + f) where u is number of users and m is number of movies and f is user_features
 #We need a matrix u x u which has cosine distances between users
+utility_mat <- cbind(utility_mat, users[shrt_users, -1])
 
 utility_mat_mag <- adply(utility_mat, 1, function(x){
   return(x/sqrt(sum(x^2)))

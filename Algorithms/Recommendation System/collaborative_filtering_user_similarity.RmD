@@ -1,12 +1,12 @@
 ---
-title: "Recommendation Systems - Item Profile"
+title: "Recommendation Systems - Collaborative Filtering(User Similarity)"
 author: "Tarun Reddy Aleti"
-date: "April 7, 2016"
+date: "April 8, 2016"
 output: html_document
 ---
 ### Executive Summary
 - The datasets required for the analysis can be downloaded from these links [Movies](https://inclass.kaggle.com/c/movie/download/movies.dat), [Users](https://inclass.kaggle.com/c/movie/download/users.dat), [Ratings](https://inclass.kaggle.com/c/movie/download/training_ratings_for_kaggle_comp.csv) and [ReadMe](https://inclass.kaggle.com/c/movie/download/README) 
-- Idea is to use item profile data mining technique to develop a recommendation system for movies for a given user
+- Idea is to use collaborative filtering(user similarity) data mining technique to develop a recommendation system for movies for a given user
 
 ### Required Packages
 
@@ -58,6 +58,8 @@ genres <- c("Action", "Adventure", "Animation", "Children's",
 - Create dummy variables for each genre
 - Combine the 3 data sets to come with a single dataset
 - We could create dummy variables for year movie released (decade it belongs to) but the Movie Name column is not clean. Even after multiple trials we couldn't find a way out. We are ignoring this feature for now.
+- We create dummy variables for users age, gender and occupation.
+- Just like movie titles even after lot of cleaning zip codes were incorrect, hence, for now we will ignore them.
 
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
 movie_genre <- adply(movies[ ,'Genres'], 1, .id = NULL, function(x){
@@ -69,8 +71,31 @@ movie_genre <- adply(movies[ ,'Genres'], 1, .id = NULL, function(x){
   dummy_genre[index_g] <- 1
   return(dummy_genre)
 })
-
 colnames(movie_genre) <- paste("genres", genres, sep = "_")
+
+users_age <- adply(users[ ,'Age'], 1, .id = NULL, function(x){
+  dummy_age <- rep(0, length(ages))
+  dummy_age[which(ages == x)] <- 1
+  return(dummy_age)
+})
+colnames(users_age) <- paste("ages", ages, sep = "_")
+
+users_occupation <- adply(users[ ,'Occupation'], 1, .id = NULL, function(x){
+  dummy_occupation <- rep(0, length(occupations))
+  dummy_occupation[which(occupations == x)] <- 1
+  return(dummy_occupation)
+})
+colnames(users_occupation) <- paste("occupations", occupations, sep = "_")
+
+users_gender <- adply(users[ ,'Gender'], 1, .id = NULL, function(x){
+  dummy_gender <- rep(0, length(genders))
+  dummy_gender[which(genders == x)] <- 1
+  return(dummy_gender)
+})
+colnames(users_gender) <- paste("genders", genders, sep = "_")
+
+users <- do.call("cbind", list(users, users_gender, users_age, users_occupation))
+users <- users[ ,-c(2:5)]
 movies <- cbind(movies, movie_genre)
 rownames(movie_genre) <- movies$MovieID
 
@@ -80,12 +105,6 @@ query <- "SELECT m.*, u.*, r.rating
           INNER JOIN users as u on r.user = u.UserID"
 
 data <- sqldf(query)
-
-data[is.na(data$Gender), 'Gender'] <- 'NA'
-data$Age <- as.character(data$Age)
-data$Occupation <- as.character(data$Occupation)
-data[is.na(data$Age), 'Age'] <- 'NA'
-data[is.na(data$Occupation), 'Occupation'] <- 'NA'
 data$UserID <- as.character(data$UserID)
 ```
 
@@ -151,135 +170,107 @@ colnames(finaltest) <- gsub("['-]", "", colnames(finaltest))
 ```
 
 ### Item Profile
-- First we need to find the average rating given by a user
-- Each movie has genre associated with that. So for every rating user would have given for a movie belongs to some genres and doesn't belong to some genres
-- For genres it belongs subtract the rating given to it average ratings to remove biased ratings by users
-- If we notice
-	+ Movie and Genre will be a matrix of size m x f where m is number of movies and f is number of features per movie
-	+ User vector we estimated will be matrix of size u x f where u is number of users and f is ratings given by user for each feature of the movie
-	+ To get final utility matrix all we need multiplication of these u x f with the transpose of m x f with cosine distances
-	+ Whenever a new user comes in who didn't rate any movie before or a movie which doesn't belong to any genres we will see that cosine distance will have '0' in denominator. We will substitute that distance with 0
+- First we need to find the average rating given by a user and subtract from the ratings 
+- We need to calculate the similarity between users first
+	+ We shall use ratings given by user for a movie(m) as well as features that define a user(f)
+- To estimate rating a user would have given for a movie we need to find each movie rating given by nearest 10 users to the user who would have
+given a rating and then take average of those ratings
+	+ **10** is chosen arbitarily can be changed to find the best value.
 
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
-#Each Movie has boolean profile based upon actor, director, genre, year, related to user
-#User and Movie has utility matrix related to each other
-#For each movie there will be features say genre
-#User would give ratings across movies. Say average rating given by user across movies 'x'.
-query <- "SELECT UserID, avg(rating) as avg_rating
-FROM train
-GROUP BY UserID"
-avg_rating <- sqldf(query)
-#Then only some of these movies belong to particular genre.
-#For those movies recalcuate aggregate ratings -- this will component score for that feature for that user.
-query <- "SELECT t.*, a.avg_rating
-FROM train as t 
-INNER JOIN avg_rating as a on a.UserID = t.UserID"
-fdata <- sqldf(query)
-
-feature_mat <- adply(rownames(ut_mat), 1, .id = NULL, function(x){
-  y <- fdata[fdata$UserID == x, ]
-  if (dim(y) > 0){
-    final_z <- NULL
-    
-    genre_z <- adply(genres, 1, function(x){
-      query <- paste("SELECT UserID, avg(rating - avg_rating)
-                     FROM y
-                     WHERE ", paste("genres", x, sep = "_"), " > 0 ",
-                     "GROUP BY UserID", sep = "")
-      z <- sqldf(query)
-      if(dim(z)[1] == 0){
-        final_z <- 0
-      } else {
-        final_z <- z[ ,2]
-      }
-      return(final_z)
-    })
-    genre_z <- t(genre_z)
-    return(as.numeric(genre_z[2, ]))
-  } else {
-    return(rep(0, length(genres)))
+utility_mat <- adply(ut_mat, 1, .id = NULL, function(x){
+  if (length(which(x > 0)) > 0){
+    x[which(x > 0)] <- x[which(x > 0)] - mean(as.numeric(x[which(x > 0)]))
   }
+  return(x)
 })
-colnames(feature_mat) <- genres
-rownames(feature_mat) <- shrt_users
 
-user_feature <- feature_mat
-movie_feature <- movie_genre[!is.na(match(rownames(movie_genre),  shrt_movies)), ]
+### Option 1: Finding Similar users to one user. We need to find users that have
+#more cosine distance between movies they like
+#utility_matrix is u x (m + f) where u is number of users and m is number of movies and f is users features
+#We need a matrix u x u which has cosine distances between users
 
-#Movie vector will m x f where m indicates m movies and f features
-#User vector indicates u x f where u indicates u users and f features
-#For every user for every movie we can calculate the cosine distance from this we will get final utility matrix
-user_feature_mag <- adply(user_feature, 1, .id = NULL, function(x){
+utility_mat <- adply(ut_mat, 1, .id = NULL, function(x){
+  if (length(which(x > 0)) > 0){
+    x[which(x > 0)] <- x[which(x > 0)] - mean(as.numeric(x[which(x > 0)]))
+  }
+  return(x)
+})
+
+utility_mat <- cbind(utility_mat, users[shrt_users, -1])
+
+utility_mat_mag <- adply(utility_mat, 1, function(x){
   return(x/sqrt(sum(x^2)))
 })
-user_feature_mag <- as.matrix(user_feature_mag)
-user_feature_mag[is.na(user_feature_mag)] <- 0
+utility_mat_mag[is.na(utility_mat_mag)] <- 0
 
-movie_feature_mag <- adply(movie_feature, 1, .id = NULL, function(x){
-  return(x/sqrt(sum(x^2)))
+user_user <- as.matrix(utility_mat_mag) %*% as.matrix(t(utility_mat_mag))
+colnames(user_user) <- shrt_users
+rownames(user_user) <- shrt_users
+
+
+#For each movie raitng given by a user lets choose nearest 10 users to the user who would have
+#given a rating and then take average of those ratings
+
+user_movie_rating <- adply(ut_mat, 1, .id = NULL, function(x){
+  #Every column in this a movie
+  users_dist <- data.frame(user_user[setdiff(rownames(user_user), rownames(x)), rownames(x)])
+  colnames(users_dist) <- 'Distance'
+  users_dist$UserID <- setdiff(rownames(user_user), rownames(x))
+  #Average rating given by the User
+  if(length(which(x > 0)) > 0){
+    avg_rating_by_user <- mean(as.numeric(x[which(x > 0)]))
+  } else {
+    avg_rating_by_user <- 0
+  }
+  all_movies <- adply(x, 2, function(y){
+    #For a given user and movie find the nearest 10 users in user_user who have given a rating
+    #for that movie in ut_mat
+      all_user_movie_rating <- data.frame(ut_mat[setdiff(rownames(user_user), rownames(x)), colnames(y)])
+      colnames(all_user_movie_rating) <- 'rating'
+      all_user_movie_rating$UserID <- setdiff(rownames(user_user), rownames(x))
+      query <- "SELECT u.UserID, u.Distance, a.rating
+                FROM users_dist as u 
+                INNER JOIN all_user_movie_rating as a
+                ON u.UserID = a.UserID
+                WHERE a.rating != 0
+                ORDER BY u.Distance desc"
+      nearest_user_movie_ratings <- sqldf(query)
+      if(dim(nearest_user_movie_ratings)[1] == 0){
+        avg_rating_by_near_users <- 0
+      } else if (dim(nearest_user_movie_ratings)[1] <= 10){
+        avg_rating_by_near_users <- as.numeric(mean(nearest_user_movie_ratings$rating))
+      } else {
+        nearest_10_user_movie_ratings <- nearest_user_movie_ratings[1:10, ]
+        #Average of the 10 ratings in the value of rating for a given user and movie combination
+        avg_rating_by_near_users <- as.numeric(mean(nearest_10_user_movie_ratings$rating))
+      }
+      return(avg_rating_by_near_users)
+  })
+  all_movies <- data.frame(t(all_movies[ ,2]))
+  colnames(all_movies) <- shrt_movies
+  return(all_movies)
 })
-movie_feature_mag <- as.matrix(t(movie_feature_mag))
-movie_feature_mag[is.na(movie_feature_mag)] <- 0
-#Need to convert all NaN to 0
-
-user_movie <- user_feature_mag %*% movie_feature_mag
-colnames(user_movie) <- shrt_movies
-rownames(user_movie) <- shrt_users
+rownames(user_movie_rating) <- shrt_users
 ```
 
 ### Prediction
-- We have a matrix which will tell which movie the user prefers. We just need to sort the values in the matrix for that user and would give us the order of movies to recommend
+- We have a matrix which will gives us user rating for a movie
 - In order to predict the rating the user would have given to a new movie we need to take following steps
-	+ First thing to note is that all ratings are either 1, 2, 3, 4, or 5
-	+ We might know only few movies the user would have rated.
-	+ Use the matrix values for those movies and user ratings to make predictions.
-		
+	+ Identify row the user belongs to in matrix
+	+ Identify column the user belongs to in matrix
+	
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
-
 test$rating_pred <- adply(test, 1, .id = NULL, function(x){
-   item <- user_movie[rownames(user_movie) == x$UserID, ]
-   user_ratings <- ut_mat[rownames(ut_mat) == x$UserID, ]
-   if(length(item) > 0){
-     if(max(user_ratings) > 0){
-       movie_user_rated <- user_ratings[as.numeric(user_ratings) > 0]
-       movie_user_rated_item <- item[as.numeric(user_ratings) > 0]
-       test_movie_user_item <- item[as.numeric(user_ratings) == x$MovieID]
-       movie_user_item <- c(test_movie_user_item, movie_user_rated_item)
-       movie_user_rated <- c(NA, movie_user_rated) #NA indicates test one yet to be rated
-       order_movie_user_item <- order(movie_user_item)
-       if(order_movie_user_item[1] == 1){
-         #Movie had highest item value for this user
-         if(movie_user_rated[order_movie_user_item[2]] == 5){
-           #Next biggest rating is 5 hence this movie also gets rating 5
-           return(5)
-         } else {
-           #Next biggest rating is less than 5 hence this movie rating 
-           #is one more than that rating 
-           return(movie_user_rated[order_movie_user_item[2]] + 1)
-         }
-       } else if (order_movie_user_item[length(order_movie_user_item)] == 1){
-         #Movie had lowest item value for this user
-         if(movie_user_rated[order_movie_user_item[length(order_movie_user_item)] - 1] == 1){
-           #Next big rating is 1 hence this movie also gets rating 1
-           return(1)
-         } else {
-           #Next big rating is more than 1 hence this movie rating is one less than that rating 
-           return(movie_user_rated[order_movie_user_item[length(order_movie_user_item)]] - 1)
-         }
-       } else {
-         movie_user_rated <- movie_user_rated[order_movie_user_item]
-         loc_test_movie_user <- which(is.na(movie_user_rated))
-         rate_test_movie_user <- (movie_user_rated[loc_test_movie_user + 1] + movie_user_rated[loc_test_movie_user - 1])/2
-         return(round(rate_test_movie_user))
-       }
-     } else {
-         return('Noratings in Train')
-       }
-   } else {
-     return('User not in item')
-   }
+  row_id <- which(rownames(user_movie_rating) == x$UserID)
+  col_id <- which(colnames(user_movie_rating) == x$MovieID)
+  if(length(row_id) == 1 & length(col_id) == 1){
+    return(user_movie_rating[row_id, col_id])
+  } else {
+    return(NA)
+  }
 })
 ```
 
 ### Conclusion
-- Successfully used item profile method to make a rating prediction for a given user
+- Successfully used collaborative filtering user similarity method to make a rating prediction for a given user and movie combinations
