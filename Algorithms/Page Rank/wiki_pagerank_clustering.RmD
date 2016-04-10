@@ -98,12 +98,11 @@ cl <- walktrap.community(nodes_graph, steps = 3)
 
 topClusters <- table(cl$membership) %>% sort(decreasing = TRUE)
 head(topClusters)
-cluster_color <- rep('NA', length(vertex))
-cluster_color[cl$membership == as.numeric(names(topClusters)[1])] <- "cyan"
-cluster_color[cl$membership == as.numeric(names(topClusters)[2])] <- "green"
-cluster_color[cl$membership == as.numeric(names(topClusters)[3])] <- "blue"
-cluster_color[cl$membership == as.numeric(names(topClusters)[4])] <- "red"
-cluster_color[cl$membership > max(c(as.numeric(names(topClusters)[1:4])))] <- "yellow"
+V(nodes_graph) [cl$membership == names(topClusters)[1]]$color <- "cyan"
+V(nodes_graph) [cl$membership == names(topClusters)[2]]$color <- "green"
+V(nodes_graph) [cl$membership == names(topClusters)[3]]$color <- "blue"
+V(nodes_graph) [cl$membership == names(topClusters)[4]]$color <- "red"
+V(nodes_graph) [cl$membership != c(names(topClusters)[1:4])]$color <- "yellow"
 
 
 cluster <- function(i, clusters, pagerank, n=10){
@@ -127,10 +126,10 @@ plot(nodes_graph,
      vertex.size = 2,
      vertex.label = NA, 
      edge.arrow.size = 0.5,
-     vertex.color= cluster_color,
+     vertex.color= V(nodes_graph)$color,
      vertex.frame.color='blue'
 )
-title(cex.main = 12)
+title(cex.main = 4)
 
 ```
 
