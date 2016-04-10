@@ -1,0 +1,137 @@
+---
+title: "Page Rank & Clustering for WikiVotes"
+author: "Tarun Reddy Aleti"
+date: "April 10, 2016"
+output: html_document
+---
+### Executive Summary
+- The datasets required for the analysis can be downloaded from these links [WikiVotes](https://snap.stanford.edu/data/wiki-Vote.txt.gz)
+- Wikipedia is a free encyclopedia written collaboratively by volunteers around the world.
+- A small part of Wikipedia contributors are administrators, who are users with access to additional technical features that aid in maintenance. 
+- In order for a user to become an administrator a Request for adminship (RfA) is issued and the Wikipedia community via a public discussion or a vote decides who to promote to adminship. 
+- Using the latest complete dump of Wikipedia page edit history (from January 3 2008) they extracted all administrator elections and vote history data. 
+- This gave them **2,794** elections with **103,663** total votes and **7,066** users participating in the elections (either casting a vote or being voted on). Out of these **1,235 elections** resulted in a successful promotion, while **1,559** elections did not result in the promotion. 
+- Our Idea is come up with a page rank algorithm which gives rank for each user
+- Also cluster these networks into smaller networks for further analysis
+
+### Required Packages
+
+Following packages are required for the code to run efficiently.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+library(miniCRAN)
+library(igraph)
+library(magrittr)
+library(plyr)
+library(stringr)
+```
+
+### Preliminary Analysis
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+data <- readLines("Wiki-Vote.txt")
+data <- data[-c(1:4)]
+nodes <- adply(data, 1, .id = NULL, function(x){
+  y <- strsplit(x, split = "\t")
+  return(c(y[[1]][1], y[[1]][2]))
+})
+```
+
+- In the data set each unordered pair of nodes is saved once
+- Directed edge A->B means user A voted on B becoming Wikipedia administrator.
+- There are `r length(vertex)` nodes and `r length(edges)` edges
+    
+### Page Rank
+- We shall use igraph library functions for our analysis
+- All we need to do is convert the dataset into the format that igraph functions can accept
+- We haven't added weights to the edges as we do not have any information on that
+- We can vary the damping value, but for now using default 0.85
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+nodes_graph <- graph.data.frame(nodes, direct = FALSE)
+nodes_page_rank <- page.rank(nodes_graph)
+nodes_rank <- nodes_page_rank$vector
+vertex <- V(nodes_graph)
+edges <- E(nodes_graph)
+x <- data.frame(nodes_rank[1:10])
+colnames(x) <- "Page Rank"
+x
+```
+
+- The row indicates the vertex name and page rank is the rank of that vertex
+
+### Visualization
+
+- The size of the circle indicates the page rank of that vertex
+- Name near the circle is the name of the vertex
+- We have removed vertices which have less than 250 degrees for the plot
+```{r, echo = TRUE, warning = FALSE, message = FALSE, fig.width=18, fig.height=18}
+small_vertex <- vertex[degree(nodes_graph) < 250]
+plot_network <- delete.vertices(nodes_graph, small_vertex)
+
+par(mai=c(0,0,1,0))
+plot(plot_network,
+     layout=layout.fruchterman.reingold,
+     main='Wiki Network',
+     vertex.size = as.numeric(nodes_rank[match(V(plot_network)$name, 
+                                                    names(nodes_rank))]) * 10000,
+     vertex.label.dist=0.5,
+     vertex.frame.color='blue',
+     vertex.label.color='black',
+     vertex.label.font=2,	
+     vertex.label=V(plot_network)$name,	
+     vertex.label.cex = as.numeric(nodes_rank[match(V(plot_network)$name, 
+                                                    names(nodes_rank))]) * 1000
+)
+title(cex.main = 4)
+```
+
+### Clustering
+- We shortlist top 80% vertex based on their page rank
+- Reconstruct the graph using these vertices
+- There are many clustering algorith available like
+  + Walktrap: This algorithm finds densely connected subgraphs by performing random walks. The idea is that random walks will tend to stay inside communities instead of jumping to other communities
+  + Edge Betweeness: This is a divisive algorithm where at each step the edge with the highest betweenness is removed from the graph. For each division you can compute the modularity of the graph and then choose to cut the dendrogram where the process gives you the highest value of modularity
+  + Fast Greedy: Algorithm is agglomerative and at each step the merge is decided by the optimization of modularity that it produces as the result of the merge. This is very fast, but has the disadvantage of being a greedy algorithm, so it is might not produce the best overall community partitioning, although I find it very useful and very accurate
+- We have used walktrap method for our analysis and determine the communities. We can control the length of random walks to perform parameter
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, fig.width=18, fig.height=18}
+cl <- walktrap.community(nodes_graph, steps = 3)
+
+topClusters <- table(cl$membership) %>% sort(decreasing = TRUE)
+head(topClusters)
+V(nodes_graph) [cl$membership == names(topClusters)[1]]$color <- "cyan"
+V(nodes_graph) [cl$membership == names(topClusters)[2]]$color <- "green"
+V(nodes_graph) [cl$membership == names(topClusters)[3]]$color <- "blue"
+V(nodes_graph) [cl$membership == names(topClusters)[4]]$color <- "red"
+V(nodes_graph) [cl$membership != c(names(topClusters)[1:4])]$color <- "yellow"
+
+
+cluster <- function(i, clusters, pagerank, n=10){
+  group <- clusters$names[clusters$membership == i]
+  rank_group <- data.frame(group, pagerank[group, ])
+  colnames(rank_group) <- c("group", "pagerank")
+  rank_group <- rank_group[order(rank_group$pagerank, decreasing = FALSE), ]
+  return(head(rank_group, n))
+}
+
+cluster_display <- lapply(names(topClusters)[1:10], cluster, clusters=cl,
+            pagerank=data.frame(nodes_rank), n=20)
+
+cluster_display
+
+
+par(mai=c(0,0,1,0))
+plot(nodes_graph,
+     layout=layout.fruchterman.reingold,
+     main='Wiki Network Clusters',
+     vertex.size = 2,
+     vertex.label = NA, 
+     edge.arrow.size = 0.5,
+     vertex.color= V(nodes_graph)$color,
+     vertex.frame.color='blue'
+)
+title(cex.main = 4)
+
+```
+
+### Conclusion
+- Successfully used igraph functions for page rank and clustering the WikiVote data
