@@ -6,3 +6,7 @@
 *.tif
 *.pem
 *.ppk
+AWS/IPs.txt
+*.zip
+*.gz
+Algorithms/Page Rank/Wiki-Vote.txt
