@@ -10,3 +10,5 @@ AWS/IPs.txt
 *.zip
 *.gz
 Algorithms/Page Rank/Wiki-Vote.txt
+Algorithms/Similar Items/data/
+Algorithms/Similar Items/titles/
