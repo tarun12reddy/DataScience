@@ -6,7 +6,7 @@ output: html_document
 ---
 ### Executive Summary
 - The datasets required for the analysis can be downloaded from these links [Movies](https://inclass.kaggle.com/c/movie/download/movies.dat), [Users](https://inclass.kaggle.com/c/movie/download/users.dat), [Ratings](https://inclass.kaggle.com/c/movie/download/training_ratings_for_kaggle_comp.csv) and [ReadMe](https://inclass.kaggle.com/c/movie/download/README) 
-- Idea is to use collaborative filtering(user similarity) data mining technique to develop a recommendation system for movies for a given user
+- Idea is to use Weighted K-Nearest Neighbours Machine Learning Algorithm to develop a recommendation system for movies for a given user
 
 ### Required Packages
 
@@ -19,6 +19,7 @@ library(knitr)
 library(caret)
 library(sqldf)
 ```
+
 ### Preliminary Analysis
 
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
@@ -41,6 +42,11 @@ genres <- c("Action", "Adventure", "Animation", "Children's",
             "Comedy", "Crime", "Documentary", "Drama", "Fantasy",
             "Film-Noir", "Horror", "Musical", "Mystery", "Romance",
             "Sci-Fi", "Thriller", "War", "Western")
+
+
+ages <- levels(as.factor(users$Age))
+occupations <- levels(as.factor(users$Occupation))
+genders <- levels(as.factor(users$Gender))
 ```
 
 - We have two datasets in hand - Movies and Ratings
@@ -108,12 +114,22 @@ data <- sqldf(query)
 data$UserID <- as.character(data$UserID)
 ```
 
-### Feature Extraction
+### Train and Test Sets
 - We need to create a train and test from the data set
 - We shall assign 10% of data randomly to test and 90% to train
 - We can finally test the algorithm on kaggle test data set.
 
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+slctd_users <- sample(unique(data$UserID), length)
+data <- data[ ,c(setdiff(colnames(data), c('Genres')))]
+data <- data[!is.na(match(data$UserID, slctd_users)), ]
+trainIndex <- createDataPartition(data$rating, p = .7, list = FALSE)
+train <- data[trainIndex, ]
+test <- data[-trainIndex, ]
+
+
+
+
 trainIndex <- createDataPartition(data$UserID, p = .9, list = FALSE)
 train <- data[trainIndex, ]
 test <- data[-trainIndex, ]
