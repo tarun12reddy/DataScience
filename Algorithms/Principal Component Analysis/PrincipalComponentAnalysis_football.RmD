@@ -1,0 +1,231 @@
+---
+title: "Football Win"
+author: "Tarun Reddy Aleti"
+date: "April 4th, 2016"
+output: html_document
+---
+
+### Executive Summary
+- The data set at hand covers all the "Serie A" football matches for the last 8 years of Italian Football League.
+- Our goal is to see if we can principal component analysis to do variable reduction.
+- The dataset for the model can be downloaded from [train](https://inclass.kaggle.com/c/football-data-challenge/download/train.csv), [test](https://inclass.kaggle.com/c/football-data-challenge/download/test.csv)
+
+#### Required Packages
+
+Following packages are required for the code to run efficiently.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+library(MASS)
+library(plyr)
+library(knitr)
+library(zipcode)
+library(sqldf)
+library(lubridate)
+library(caret)
+library(psych)
+```
+
+#### Preliminary Analysis
+
+For the code to execute, all the datasets should be in the R working directory. The datasets are in .csv format.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+set.seed(1)
+data <- read.csv("train.csv", header = TRUE, stringsAsFactors = FALSE)
+final_test <- read.csv("test.csv", header = TRUE, stringsAsFactors = FALSE)
+final_test$FTR <- NA
+full_data <- rbind(data, final_test)
+```
+
+- The data set under consideration has a total of **`r nrow(data)`** rows and **`r ncol(data)-2`** independent variables. Our dependent variable is *FTR (Full Time Result)* and is a categorical variable, wherein **A** indicates that Away team won, **H** indicates that home team won and **D** indicates that result was a draw
+- Independent Variables are as follows
+
+	1. *Date*: Indicates when the match was played
+		+ Can extract Weekday/Weekend, DayofWeek and Month information
+	2. *HomeTeam*: Name of Home Team in the match
+		+ There are `r length(levels(as.factor(data$HomeTeam)))` different teams. We might need to create dummy variables for them.
+		+ The team names are `r unique(data$HomeTeam)`.
+	3. *AwayTeam*: Name of Away Team in the match
+		+ There are `r length(levels(as.factor(data$AwayTeam)))` different teams. We might need to create dummy variables for them.
+		+ The team names are `r unique(data$AwayTeam)`.
+		+ There are same number of Home Teams as Away Teams
+	4. *B365H*: Bet365 home win odds
+	5. *B365D*: Bet365 draw odds
+  6. *B365A*: Bet365 away win odds
+  7. *BWH*: Bet&Win home win odds
+  8. *BWD*: Bet&Win draw odds
+  9. *BWA*: Bet&Win away win odds
+  10. *IWH*: Interwetten home win odds
+  11. *IWD*: Interwetten draw odds
+  12. *IWA*: Interwetten away win odds
+  13. *LBH*: Ladbrokes home win odds
+  14. *LBD*: Ladbrokes draw odds
+  15. *LBA*: Ladbrokes away win odds
+  16. *VCH*: VC Bet home win odds
+  17. *VCD*: VC Bet draw odds
+  18. *VCA*: VC Bet away win odds
+  19. *WHH*: William Hill home win odds
+  20. *WHD*: William Hill draw odds
+  21. *WHA*: William Hill away win odds
+
+### Dummy Variables
+
+First we need to create dummy variables for all the categorical variables like HomeTeam and AwayTeam
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+fac_var <- c("HomeTeam", "AwayTeam")
+
+for(var in fac_var){
+	full_data[ ,var] <- as.factor(full_data[ ,var])
+}
+
+dumm_var <- fac_var
+
+for(dumm in dumm_var){
+	dumm_data <- model.matrix( ~ full_data[ ,dumm] - 1, data = full_data)
+	colnames(dumm_data) <- paste(dumm, gsub("full_data|, dumm|[[:punct:]]", "", colnames(dumm_data)), sep = "_")
+	full_data <- cbind(full_data, dumm_data)
+}
+
+colnames(full_data) <- gsub(" ", "", colnames(full_data))
+final_data <- full_data[1:dim(data)[1], ]
+final_test <- full_data[(dim(data)[1]+1):(dim(data)[1]+dim(final_test)[1]), ]
+```
+
+### Missing data - Data Imputation
+
+The bid odds have data missing with `r sum(is.na(final_data[ ,'B365H']))` for Bet365, `r sum(is.na(final_data[ ,'BWH']))` for Bet&Win, `r sum(is.na(final_data[ ,'IWH']))` for InterWetten, `r sum(is.na(final_data[ ,'LBH']))` for Ladbrokes and `r sum(is.na(final_data[ ,'WHH']))` for WilliamHill and `r sum(is.na(final_data[ ,'VCH']))` for VC Bet. We need to impute data for each of them. We simultaneously need to fill the missing data in the test set.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+for(bet in colnames(final_data)[6:23]){
+  missing_bet <- data[(is.na(final_data[ ,bet])), ]
+  missing_test <- final_test[(is.na(final_test[ ,bet])), ]
+  if(dim(missing_bet)[1] > 0){
+    for(i in 1:dim(missing_bet)[1]){
+      x <- data[data$HomeTeam == missing_bet[i, 'HomeTeam'] & data$AwayTeam == missing_bet[i, 'AwayTeam'], ]
+      if(dim(x)[1] == 1){
+        x <- data[(data$HomeTeam == missing_bet[i, 'HomeTeam'] | data$AwayTeam == missing_bet[i, 'AwayTeam']) & year(data$Date) == year(missing_bet[i, 'Date']), ]
+      }
+      x$rate <- 1
+      x[x[ ,'FTR'] == missing_bet[i, 'FTR'], 'rate'] <- 2
+      final_data[which(is.na(data[ ,bet]))[i], bet] <- sum(x$rate * x[ ,bet], na.rm = TRUE)/sum(x$rate, na.rm = TRUE)
+    }
+  }
+  if(dim(missing_test)[1] > 0){
+    for(i in 1:dim(missing_test)[1]){
+      x <- data[data$HomeTeam == missing_test[i, 'HomeTeam'] & data$AwayTeam == missing_test[i, 'AwayTeam'], ]
+      final_test[as.numeric(which(is.na(final_test[ ,bet])))[1], bet] <- mean(x[ ,bet])
+    }
+  }
+}
+```
+
+Used other records available for same home team and away team and imputed using weighted mean of the data where data with same result is given twice the weightage compared with other data.
+
+### Near Zero Variance
+ 
+We need not consider independent variables which do not enough variance in itself. We can use nzv of caret package for this analysis. Following `r length(colnames(final_data)[nzv(final_data)])` variables have near zero variance and we need not consider them further: `r colnames(final_data)[nzv(final_data)]`
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+nzv_var <- nzv(final_data)
+final_data <- final_data[ ,-nzv_var]
+final_test <- final_test[ ,-nzv_var]
+```
+
+### Creating Train and Test Samples
+
+- We have a total of **`r nrow(final_data)`** rows and **`r ncol(final_data)-2`** independent variables. Now that we have a clean data set before we head to modeling, we need to create a train and test data sets.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+trainIndex <- createDataPartition(final_data$FTR, p = .7, list = FALSE)
+train <- final_data[trainIndex, ]
+test <- final_data[-trainIndex, ]
+```
+
+- Size of train data set is **`r nrow(train)`** and test data set is **`r nrow(test)`**
+
+### Outlier Removal
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train <- train[train[ ,'B365H'] < (mean(train[ ,'B365H']) + 2.58 * sd(train[ ,'B365H'])) &
+               train[ ,'B365H'] > (mean(train[ ,'B365H']) - 2.58 * sd(train[ ,'B365H'])) &
+               train[ ,'B365D'] < (mean(train[ ,'B365D']) + 2.58 * sd(train[ ,'B365D'])) &
+               train[ ,'B365D'] > (mean(train[ ,'B365D']) - 2.58 * sd(train[ ,'B365D'])) &
+               train[ ,'B365A'] < (mean(train[ ,'B365A']) + 2.58 * sd(train[ ,'B365A'])) &
+               train[ ,'B365A'] > (mean(train[ ,'B365A']) - 2.58 * sd(train[ ,'B365A'])) &
+               train[ ,'BWH'] < (mean(train[ ,'BWH']) + 2.58 * sd(train[ ,'BWH'])) &
+               train[ ,'BWH'] > (mean(train[ ,'BWH']) - 2.58 * sd(train[ ,'BWH'])) &
+               train[ ,'BWD'] < (mean(train[ ,'BWD']) + 2.58 * sd(train[ ,'BWD'])) &
+               train[ ,'BWD'] > (mean(train[ ,'BWD']) - 2.58 * sd(train[ ,'BWD'])) &
+               train[ ,'BWA'] < (mean(train[ ,'BWA']) + 2.58 * sd(train[ ,'BWA'])) &
+               train[ ,'BWA'] > (mean(train[ ,'BWA']) - 2.58 * sd(train[ ,'BWA'])) &
+               train[ ,'IWH'] < (mean(train[ ,'IWH']) + 2.58 * sd(train[ ,'IWH'])) &
+               train[ ,'IWH'] > (mean(train[ ,'IWH']) - 2.58 * sd(train[ ,'IWH'])) &
+               train[ ,'IWD'] < (mean(train[ ,'IWD']) + 2.58 * sd(train[ ,'IWD'])) &
+               train[ ,'IWD'] > (mean(train[ ,'IWD']) - 2.58 * sd(train[ ,'IWD'])) &
+               train[ ,'IWA'] < (mean(train[ ,'IWA']) + 2.58 * sd(train[ ,'IWA'])) &
+               train[ ,'IWA'] > (mean(train[ ,'IWA']) - 2.58 * sd(train[ ,'IWA'])) &
+               train[ ,'LBH'] < (mean(train[ ,'LBH']) + 2.58 * sd(train[ ,'LBH'])) &
+               train[ ,'LBH'] > (mean(train[ ,'LBH']) - 2.58 * sd(train[ ,'LBH'])) &
+               train[ ,'LBD'] < (mean(train[ ,'LBD']) + 2.58 * sd(train[ ,'LBD'])) &
+               train[ ,'LBD'] > (mean(train[ ,'LBD']) - 2.58 * sd(train[ ,'LBD'])) &
+               train[ ,'LBA'] < (mean(train[ ,'LBA']) + 2.58 * sd(train[ ,'LBA'])) &
+               train[ ,'LBA'] > (mean(train[ ,'LBA']) - 2.58 * sd(train[ ,'LBA'])) &
+               train[ ,'WHH'] < (mean(train[ ,'WHH']) + 2.58 * sd(train[ ,'WHH'])) &
+               train[ ,'WHH'] > (mean(train[ ,'WHH']) - 2.58 * sd(train[ ,'WHH'])) &
+               train[ ,'WHD'] < (mean(train[ ,'WHD']) + 2.58 * sd(train[ ,'WHD'])) &
+               train[ ,'WHD'] > (mean(train[ ,'WHD']) - 2.58 * sd(train[ ,'WHD'])) &
+               train[ ,'WHA'] < (mean(train[ ,'WHA']) + 2.58 * sd(train[ ,'WHA'])) &
+               train[ ,'WHA'] > (mean(train[ ,'WHA']) - 2.58 * sd(train[ ,'WHA'])) &
+               train[ ,'VCH'] < (mean(train[ ,'VCH']) + 2.58 * sd(train[ ,'VCH'])) &
+               train[ ,'VCH'] > (mean(train[ ,'VCH']) - 2.58 * sd(train[ ,'VCH'])) &
+               train[ ,'VCD'] < (mean(train[ ,'VCD']) + 2.58 * sd(train[ ,'VCD'])) &
+               train[ ,'VCD'] > (mean(train[ ,'VCD']) - 2.58 * sd(train[ ,'VCD'])) &
+               train[ ,'VCA'] < (mean(train[ ,'VCA']) + 2.58 * sd(train[ ,'VCA'])) &
+               train[ ,'VCA'] > (mean(train[ ,'VCA']) - 2.58 * sd(train[ ,'VCA'])), ]
+```
+
+- For the continuous independent variables, we have to remove outliers that fall beyond 2.58 times the standard deviation on either side of the mean of that variable (2.58 signifies the two sided 99.5% confidence). 
+*Note: Removed outliers after creating a train and test data sets, inorder to make sure how the performance will be in test set even with presence of outliers*
+- The train data set has now **`r nrow(train)`** rows and **`r ncol(train)-1`** columns.
+
+### Principal Component Analysis
+
+- Final check we need to do is correlation among the independent continuous variables. If they have high correlation then we may use Principal Component Analysis or Factor Analysis.
+There are `r sum(cor(train[ ,c(6:23)]) > 0.8 & cor(train[ ,c(6:23)]) < 1)/2` correlations that have more than 0.8 value, indicating very high correlation in the continuous independent variable. Need to normalize the data before performing factor analysis
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+train_mean <- apply(train[ ,c(6:23)], 2, mean)
+train_sd <- apply(train[ ,c(6:23)], 2, sd)
+for(i in 6:23){
+  train[ ,i] <- (train[ ,i] - train_mean[i-5])/train_sd[i-5]
+  test[ ,i] <- (test[ ,i] - train_mean[i-5])/train_sd[i-5]
+  final_test[ ,i] <- (final_test[ ,i] - train_mean[i-5])/train_sd[i-5]
+}
+
+fit <- principal(train[ ,c(6:23)], nfactors=18, rotate="varimax")
+fit$loadings
+```
+- The principal components are extracted with the restriction that they are orthogonal.  Geometrically they may be viewed as dimensions in p-dimensional space where each dimension is perpendicular to each other dimension.
+
+- When we perform PCA we need to look at following values
+  + Loading Matrix: This matrix is produced by postmultiplying the matrix of eigenvectors by a matrix of square roots of the eigenvalues
+  + Eigen Values:  The variance in the correlation matrix is "repackaged" into eigenvalues.  This is accomplished by finding a matrix of eigenvectors.  When the correlation matrix is premultiplied by the transpose of V and postmultiplied by V, the resulting matrix contains eigenvalues in its main diagonal.  Each eigenvalue represents the amount of variance that has been captured by one component. 
+  + Proportion of Variance: Its the eigen value (or the variance) divided by the sum of eigen values by all components (or total variance). In general rule of thumb we consider components that explain 95% of variance
+
+- The first three principal components explain the variance present in all the 18 variables. First factor describes preference of home team winning against draw or losing (all the home bids have high positive value, while draw and away have low values), second factor shows home team not winning against draw or losing (home bids have negative value, while draw or away have high positive values), third factor shows preference for draw or away team winning (only draw and away have mostly positive values). We can define these components as StrongHome, StrongDrawWeakAway and WeakDrawStrongAway.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(train[ ,c(6:23)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
+test[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(test[ ,c(6:23)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
+final_test[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(final_test[ ,c(6:23)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
+```
+
+- Visualizing Principal Components
+# plot percentage of variance explained for each principal component    
+barplot(100*p.variance.explained, las=2, xlab='', ylab='% Variance Explained')
+http://www.r-bloggers.com/visualizing-principal-components/
+
+
+### Conclusion
+- Successfully used principal component analysis to reduce number of independent variables from 18 to 3.
