@@ -1,7 +1,7 @@
 ---
-title: "Football Win"
+title: "Principal Component Analaysis - Football"
 author: "Tarun Reddy Aleti"
-date: "April 4th, 2016"
+date: "April 14th, 2016"
 output: html_document
 ---
 
@@ -23,6 +23,7 @@ library(sqldf)
 library(lubridate)
 library(caret)
 library(psych)
+library(scatterplot3d)
 ```
 
 #### Preliminary Analysis
@@ -203,7 +204,7 @@ for(i in 6:23){
   final_test[ ,i] <- (final_test[ ,i] - train_mean[i-5])/train_sd[i-5]
 }
 
-fit <- principal(train[ ,c(6:23)], nfactors=18, rotate="varimax")
+fit <- principal(train[ ,c(6:23)], nfactors=18, rotate="none")
 fit$loadings
 ```
 - The principal components are extracted with the restriction that they are orthogonal.  Geometrically they may be viewed as dimensions in p-dimensional space where each dimension is perpendicular to each other dimension.
@@ -213,7 +214,63 @@ fit$loadings
   + Eigen Values:  The variance in the correlation matrix is "repackaged" into eigenvalues.  This is accomplished by finding a matrix of eigenvectors.  When the correlation matrix is premultiplied by the transpose of V and postmultiplied by V, the resulting matrix contains eigenvalues in its main diagonal.  Each eigenvalue represents the amount of variance that has been captured by one component. 
   + Proportion of Variance: Its the eigen value (or the variance) divided by the sum of eigen values by all components (or total variance). In general rule of thumb we consider components that explain 95% of variance
 
-- The first three principal components explain the variance present in all the 18 variables. First factor describes preference of home team winning against draw or losing (all the home bids have high positive value, while draw and away have low values), second factor shows home team not winning against draw or losing (home bids have negative value, while draw or away have high positive values), third factor shows preference for draw or away team winning (only draw and away have mostly positive values). We can define these components as StrongHome, StrongDrawWeakAway and WeakDrawStrongAway.
+- The first three principal components explain the variance present in all the 18 variables. 
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, fig.width=18, fig.height=8}
+par(mfrow = c(1, 3))
+plot(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], type='p', pch=4, cex = 0.8, xlab='Comp.1', ylab='Comp.2')
+text(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], colnames(train[ ,c(6:23)]), cex=.4, pos=4)
+abline(h = 0)
+abline(v = 0)
+plot(fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'], type='p', pch=4, cex = 0.8, xlab='Comp.2', ylab='Comp.3')
+text(fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'], colnames(train[ ,c(6:23)]), cex=.4, pos=4)
+abline(h = 0)
+abline(v = 0)
+plot(fit$loadings[ ,'PC3'], fit$loadings[ ,'PC1'], type='p', pch=4, cex = 0.8, xlab='Comp.3', ylab='Comp.1')
+text(fit$loadings[ ,'PC3'], fit$loadings[ ,'PC1'], colnames(train[ ,c(6:23)]), cex=.4, pos=4)
+abline(h = 0)
+abline(v = 0)
+
+par(mfrow = c(1, 1))
+s3d <- scatterplot3d(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'], xlab='Comp.1', ylab='Comp.2', zlab='Comp.3', pch = 20)
+s3d.coords = s3d$xyz.convert(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'])
+text(s3d.coords$x, s3d.coords$y, labels=colnames(train[ ,c(6:23)]), cex=.4, pos = 4)
+```
+
+- For each variable in the plots above we can see loading components on each axis. We could rotate the axis so that each of the points pass through x, y and z axis. After rotating we would need to recompute the loading matrix. This is done by postmultiplying the unrotated loading matrix by a orthogonal transformation matrix.
+
+- There are 3 types of rotational transformations we can employ. All these are all orthogonal rotations, that is, the axes remain perpendicular, so the components are not correlated with one another.
+  + **VARIMAX**: It is the most commonly used rotation.  Its goal is to minimize the complexity of the components by making the large loadings larger and the small loadings smaller within each component.
+  + **QUARTIMAX**: Rotation makes large loadings larger and small loadings smaller within each variable.  
+  + **EQUAMAX**: Rotation is a compromise that attempts to simplify both components and variables.  
+Note: There is a 4th type rotation method known as **OBLIQUE** rotation. But it doesn't give orthogonal components.
+
+- Used varimax rotational matrix for our analysis.
+```{r, echo = TRUE, warning = FALSE, message = FALSE, fig.width=18, fig.height=8}
+fit <- principal(train[ ,c(6:23)], nfactors=18, rotate="varimax")
+fit$loadings
+par(mfrow = c(1, 3))
+plot(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], type='p', pch=4, cex = 0.8, xlab='Comp.1', ylab='Comp.2')
+text(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], colnames(train[ ,c(6:23)]), cex=.4, pos=4)
+abline(h = 0)
+abline(v = 0)
+plot(fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'], type='p', pch=4, cex = 0.8, xlab='Comp.2', ylab='Comp.3')
+text(fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'], colnames(train[ ,c(6:23)]), cex=.4, pos=4)
+abline(h = 0)
+abline(v = 0)
+plot(fit$loadings[ ,'PC3'], fit$loadings[ ,'PC1'], type='p', pch=4, cex = 0.8, xlab='Comp.3', ylab='Comp.1')
+text(fit$loadings[ ,'PC3'], fit$loadings[ ,'PC1'], colnames(train[ ,c(6:23)]), cex=.4, pos=4)
+abline(h = 0)
+abline(v = 0)
+
+par(mfrow = c(1, 1))
+s3d <- scatterplot3d(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'], xlab='Comp.1', ylab='Comp.2', zlab='Comp.3', pch = 20)
+
+s3d.coords = s3d$xyz.convert(fit$loadings[ ,'PC1'], fit$loadings[ ,'PC2'], fit$loadings[ ,'PC3'])
+text(s3d.coords$x, s3d.coords$y, labels=colnames(train[ ,c(6:23)]), cex=.4, pos = 4)
+```
+
+First factor describes preference of home team winning against draw or losing (all the home bids have high positive value, while draw and away have low values), second factor shows home team not winning against draw or losing (home bids have negative value, while draw or away have high positive values), third factor shows preference for draw or away team winning (only draw and away have mostly positive values). We can define these components as StrongHome, StrongDrawWeakAway and WeakDrawStrongAway.
 
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
 train[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(train[ ,c(6:23)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
@@ -221,11 +278,6 @@ test[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matr
 final_test[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(final_test[ ,c(6:23)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
 ```
 
-- Visualizing Principal Components
-# plot percentage of variance explained for each principal component    
-barplot(100*p.variance.explained, las=2, xlab='', ylab='% Variance Explained')
-http://www.r-bloggers.com/visualizing-principal-components/
-
-
 ### Conclusion
 - Successfully used principal component analysis to reduce number of independent variables from 18 to 3.
+
