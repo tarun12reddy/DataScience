@@ -223,5 +223,16 @@ cluster_stats(data = user_genre, k = 5)
 cluster_stats(data = user_genre, k = 9)
 cluster_stats(data = user_genre, k = 14)
 ```
-
+- Looking at the mean value for each of the variable in 9 clusters we can name them as follows:
+	1. Dont like Musical
+	2. Dont like Animation and Childrens
+	3. Prefer Romance Comedy over Action Thriller Crime
+	4. Dont like Fantasy
+	5. Neutral
+	6. Thriller no Adventure
+	7. Dont like anything
+	8. No Documentary
+	9. Documentary
+	
+### Conclusions
 Based upon above tables we see that Cluster 14 has clusters with size very small and 1 has a cluster with very large. Also looking at nearest neighbour, RMS_STD and Centroid Distance **9 Means Clustering** seems to be the best option.
