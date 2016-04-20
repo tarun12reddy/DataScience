@@ -16,3 +16,6 @@ AWS/S3_Bucket/demo.R
 Algorithms/Spatial Analysis/ghcndms.kmz
 *.ini
 Algorithms/Spatial Analysis/SpatialAnalysis.html
+*.png
+*.rda
+*.prcp
