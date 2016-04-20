@@ -41,6 +41,8 @@ corpus <- TextReuseCorpus(dir = dir, tokenizer = tokenize_ngrams, n = 3,
                           minhash_func = minhash, keep_tokens = TRUE,
                           progress = FALSE)
 
+#lsh_probability(n = 240, b = 60, s = 0.6)
+#lsh_threshold(n = 240, b = 60)
 buckets <- lsh(corpus, bands = 60, progress = FALSE)
 candidates <- lsh_candidates(buckets)
 candidates_compare <- lsh_compare(candidates, corpus, jaccard_similarity, progress = FALSE)
