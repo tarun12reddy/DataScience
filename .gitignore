@@ -19,3 +19,7 @@ Algorithms/Spatial Analysis/SpatialAnalysis.html
 *.png
 *.rda
 *.prcp
+*.dbf
+*.kml
+*.shp
+*.shx
