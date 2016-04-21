@@ -24,3 +24,5 @@ Algorithms/Spatial Analysis/SpatialAnalysis.html
 *.shp
 *.shx
 Colaberry/
+*.txt
+*.ftp
