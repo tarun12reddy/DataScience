@@ -162,8 +162,8 @@ Size of train data set is **`r nrow(train)`** and test data set is **`r nrow(tes
 
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
 rf_model <- randomForest(train[ ,setdiff(colnames(train), "review")], train[ ,"review"])
-train$pred_rf_Canceled <- predict(rf_model, newdata = train)
-test$pred_rf_Canceled <- predict(rf_model, newdata = test)
+train$pred_rf_review <- predict(rf_model, newdata = train)
+test$pred_rf_review <- predict(rf_model, newdata = test)
 ```
 
 - Most important variables in the classification are ```importance(rf_model)```
@@ -173,14 +173,14 @@ test$pred_rf_Canceled <- predict(rf_model, newdata = test)
 ```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
 options(scipen = 999)
 conf_model_eval <- function(model_data){
-  conf_matrix <- data.frame(matrix(NA, nrow = 9, ncol = 3))
+  conf_matrix <- data.frame(matrix(NA, nrow = 9, ncol = 1))
   colnames(conf_matrix) <- c("Random Forest")
   rownames(conf_matrix) <- c("TP", "FN", "FP", "TN",
                              "Accuracy", "Precision", "Sensitivity", "Specificity", "F-Score")
   cnt <- 1
   for(model in "rf"){
-    cnfmtrx <- confusionMatrix(data = factor(model_data[ , paste("pred_", model, "_Canceled", sep = "")]),
-                               reference = factor(model_data[ ,'Canceled']), positive = '1')
+    cnfmtrx <- confusionMatrix(data = factor(model_data[ , paste("pred_", model, "_review", sep = "")]),
+                               reference = factor(model_data[ ,'review']), positive = '1')
     conf_matrix["TP", cnt] <- as.table(cnfmtrx)[1]
     conf_matrix["FN", cnt] <- as.table(cnfmtrx)[2]
     conf_matrix["FP", cnt] <- as.table(cnfmtrx)[3]
