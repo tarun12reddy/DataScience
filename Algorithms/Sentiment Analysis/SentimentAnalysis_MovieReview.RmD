@@ -1,0 +1,214 @@
+---
+title: "SentimentAnalysis_MovieReview"
+author: "Tarun Reddy Aleti"
+date: "April 29, 2016"
+output: html_document
+---
+
+### Executive Summary
+- The datasets used in this analaysis are kaggle data set for movie reviews.
+- Given datasets are divided into positively reviewed and negatively reviewed.
+- Need to use the text corpus to come up with a classification algorithm that i can rate any new review 
+
+### Required Packages
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+library(wordcloud)
+library(tm)
+library(RColorBrewer)
+library(ggplot2)
+library(SnowballC)
+library(biclust)
+library(cluster)
+library(igraph)
+library(fpc)
+library(Rcampdf)
+library(plyr)
+library(caret)
+library(randomForest)
+```
+
+### Read the Dataset
+- Creating text corpus for negative and postive reviews seperately
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+review_load <- function(data, type){
+  path <- file.path(getwd(), data, type)   
+  filenames <- dir(path)
+  reviews <- Corpus(DirSource(path))   
+  return(reviews)
+}
+
+pos_reviews <- review_load(data = "train", type = "pos")
+neg_reviews <- review_load(data = "train", type = "neg")
+
+```
+
+### clean the Dataset
+- First step is to remove the html format text(ex: <br /><br />) from the content
+- Next Clean the data in following order
+  - Removing Punctuations
+  - Removing Numbers
+  - Converting everything to lowercase
+  - Removing Stopwords
+  - Removing Stemwords
+  - Removing Whitespace
+  - Since reviews are different movies we aren't joining two words as one
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+review_clean <- function(docs){
+  docs <- llply(docs, function(x){
+                        return(gsub("<br /><br />", " ", x[["content"]]))
+                })
+  docs <- Corpus(VectorSource(docs))
+  docs <- tm_map(docs, removePunctuation)
+  docs <- tm_map(docs, removeNumbers)   
+  docs <- tm_map(docs, tolower)   
+  docs <- tm_map(docs, removeWords, stopwords("english"))   
+  docs <- tm_map(docs, stemDocument)   
+  docs <- tm_map(docs, stripWhitespace)
+  docs <- tm_map(docs, PlainTextDocument)   
+  return(docs)
+}
+pos_res <- review_clean(pos_reviews)
+neg_res <- review_clean(neg_reviews)
+```
+
+### Data Visualization
+- One of the most important feature of text analysis and especially in sentiment analysis is visualization of the data.
+- We use cloud and bar charts to visualize most frequent words for both Positive and Negative Sentiments
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+review_plots <- function(res){
+  dtm <- DocumentTermMatrix(res)   
+  freq <- sort(colSums(as.matrix(dtm)), decreasing=TRUE) 
+  wordcloud(names(freq), freq, max.words = 100)
+  wf <- data.frame(word = names(freq), freq = freq) 
+  p <- ggplot(subset(wf, freq > 1000), aes(word, freq))    
+  p <- p + geom_bar(stat="identity")   
+  p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+  p <- p + ggtitle("Frequent Words")
+  p
+}
+```
+
+1. **Positive Reviews**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+review_plots(pos_res)
+```
+
+2. **Negative Reviews**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+review_plots(neg_res)
+```
+
+### Data Preparation
+- We need not use all the words to develop the classification algorithm.
+- We shall use the most frequent words that are present in positive and negative reviews
+- Combine both these dataframes and perform classification algorithm use this final data set
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+review_format <- function(res){
+  dtm <- DocumentTermMatrix(res)   
+  dtms <- removeSparseTerms(dtm, 0.9)
+  dtms_inspect <- data.frame(inspect(dtms))
+  #Final Check for Similar Words
+  col_names_1 <- colnames(dtms_inspect)
+  col_names_2 <- wordStem(col_names_1)
+  final_dtms <- adply(unique(col_names_2), 1, .id = NULL, function(x){
+                        locs <- which(col_names_2 == x)
+                        col <- rep(0, dim(dtms_inspect)[1])
+                        for(loc in locs){
+                          col <- col + dtms_inspect[ ,loc]
+                        }
+                        if(length(locs) == 1){
+                          col_name <- col_names_1[loc]
+                        } else {
+                          col_name <- x
+                        }
+                        return(c(col, col_name))
+                      })
+  final_dtms <- t(final_dtms)
+  colnames(final_dtms) <- final_dtms[nrow(final_dtms), ]
+  final_dtms <- final_dtms[-nrow(final_dtms), ]
+  return(final_dtms)
+}
+pos_data <- data.frame(review_format(pos_res))
+pos_data$review <- 1
+neg_data <- data.frame(review_format(neg_res))
+neg_data$review <- 0
+data <- rbind.fill(pos_data, neg_data)
+data[is.na(data)] <- 0
+```
+
+- Frequent words that are common to both positive and negative reviews are `r setdiff(intersect(colnames(pos_data), colnames(neg_data)), "review")`
+- Frequent words that are present in postive reviews but not in negative reviews are `r setdiff(colnames(pos_data), intersect(colnames(pos_data), colnames(neg_data)))`
+- Frequent words that are present in negative reviews but not in positive reviews are `r setdiff(colnames(neg_data), intersect(colnames(pos_data), colnames(neg_data)))`
+
+### Train and Test Data Sets
+- We have a total of **`r nrow(data)`** rows and **`r ncol(data)-1`** independent variables. Now that we have a clean data set before we head to modeling, we need to create a train and test data sets. We use caret package *createDataParition* function for this to create 70% train and 30% test data sets.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+trainIndex <- createDataPartition(data$review, p = .7, list = FALSE)
+train <- data[trainIndex, ]
+test <- data[-trainIndex, ]
+```
+
+Size of train data set is **`r nrow(train)`** and test data set is **`r nrow(test)`**
+
+### Classification Algorithm
+- Will be using Random Forest develop classificaton algorithm for our analysis
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+rf_model <- randomForest(train[ ,setdiff(colnames(train), "review")], train[ ,"review"])
+train$pred_rf_review <- predict(rf_model, newdata = train)
+test$pred_rf_review <- predict(rf_model, newdata = test)
+```
+
+- Most important variables in the classification are ```importance(rf_model)```
+
+### Model Validation
+- We can use confusion matrix as a way to analyze performance of both train and test data sets
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+options(scipen = 999)
+conf_model_eval <- function(model_data){
+  conf_matrix <- data.frame(matrix(NA, nrow = 9, ncol = 1))
+  colnames(conf_matrix) <- c("Random Forest")
+  rownames(conf_matrix) <- c("TP", "FN", "FP", "TN",
+                             "Accuracy", "Precision", "Sensitivity", "Specificity", "F-Score")
+  cnt <- 1
+  for(model in "rf"){
+    cnfmtrx <- confusionMatrix(data = factor(model_data[ , paste("pred_", model, "_review", sep = "")]),
+                               reference = factor(model_data[ ,'review']), positive = '1')
+    conf_matrix["TP", cnt] <- as.table(cnfmtrx)[1]
+    conf_matrix["FN", cnt] <- as.table(cnfmtrx)[2]
+    conf_matrix["FP", cnt] <- as.table(cnfmtrx)[3]
+    conf_matrix["TN", cnt] <- as.table(cnfmtrx)[4]
+    conf_matrix["Accuracy", cnt] <- (conf_matrix['TP', cnt] + conf_matrix['TN', cnt])/(conf_matrix['TP', cnt] + conf_matrix['TN', cnt] + conf_matrix['FP', cnt] + conf_matrix['FN', cnt])
+    conf_matrix["Precision", cnt] <- conf_matrix['TP', cnt]/(conf_matrix['TP', cnt] + conf_matrix['FP', cnt])
+    conf_matrix["Sensitivity", cnt] <- conf_matrix['TP', cnt]/(conf_matrix['TP', cnt] + conf_matrix['FN', cnt])
+    conf_matrix["Specificity", cnt] <- conf_matrix['TN', cnt]/(conf_matrix['FP', cnt] + conf_matrix['TN', cnt])
+    conf_matrix["F-Score", cnt] <- 2*conf_matrix['TP', cnt]/(2*conf_matrix['TP', cnt] + conf_matrix['FP', cnt] + conf_matrix['FN', cnt])
+    cnt <- cnt + 1
+  }
+  return(conf_matrix)
+}
+```
+
+1. **Train Model Performance**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+conf_model_eval(train)
+```
+
+2. **Test Model Performance**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+conf_model_eval(test)
+```
+
+### Conclusions
+- Successfully mined review data and developed classification algorithm
+- Identified most frequent words for classifying a word negative or positive
+- Mined frequent words that are exclusive part of positive reviews and negative reviews

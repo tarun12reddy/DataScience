@@ -1,0 +1,21 @@
+Install EC2
+Install JAVA
+Install 7z
+Install AWSCLI
+
+
+User_Variables:
+AWS_ACCESS_KEY
+AWS_SECRET_KEY
+EC2_URL
+PATH:
+%JAVA_HOME%\bin
+%EC2_HOME%\bin
+
+System_Variables:
+EC2_HOME
+JAVA_HOME
+Path:
+C:\Program Files\7-Zip\
+C:\Users\qaz\Desktop\SourceTree_DataScience\AWS
+C:\Program Files\Amazon\AWSCLI\
