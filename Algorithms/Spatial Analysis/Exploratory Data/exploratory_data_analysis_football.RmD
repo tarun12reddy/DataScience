@@ -1,0 +1,139 @@
+---
+title: "Exploratory Data Analysis - Football"
+author: "Tarun Reddy Aleti"
+date: "April 14th, 2016"
+output: html_document
+---
+
+### Executive Summary
+- The data set at hand covers all the "Serie A" football matches for the last 8 years of Italian Football League.
+- Our goal is to do preliminary exploratory data analysis
+- The dataset for the model can be downloaded from [train](https://inclass.kaggle.com/c/football-data-challenge/download/train.csv), [test](https://inclass.kaggle.com/c/football-data-challenge/download/test.csv)
+
+#### Required Packages
+
+Following packages are required for the code to run efficiently.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+library(MASS)
+library(plyr)
+library(knitr)
+library(sqldf)
+library(ggplot2)
+```
+
+#### Preliminary Analysis
+
+For the code to execute, all the datasets should be in the R working directory. The datasets are in .csv format.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+set.seed(1)
+data <- read.csv("train.csv", header = TRUE, stringsAsFactors = FALSE)
+final_test <- read.csv("test.csv", header = TRUE, stringsAsFactors = FALSE)
+final_test$FTR <- NA
+full_data <- rbind(data, final_test)
+```
+
+- The data set under consideration has a total of **`r nrow(data)`** rows and **`r ncol(data)-2`** independent variables. Our dependent variable is *FTR (Full Time Result)* and is a categorical variable, wherein **A** indicates that Away team won, **H** indicates that home team won and **D** indicates that result was a draw
+- Independent Variables are as follows
+
+	1. *Date*: Indicates when the match was played
+		+ Can extract Weekday/Weekend, DayofWeek and Month information
+	2. *HomeTeam*: Name of Home Team in the match
+		+ There are `r length(levels(as.factor(data$HomeTeam)))` different teams. We might need to create dummy variables for them.
+		+ The team names are `r unique(data$HomeTeam)`.
+	3. *AwayTeam*: Name of Away Team in the match
+		+ There are `r length(levels(as.factor(data$AwayTeam)))` different teams. We might need to create dummy variables for them.
+		+ The team names are `r unique(data$AwayTeam)`.
+		+ There are same number of Home Teams as Away Teams
+	4. *B365H*: Bet365 home win odds
+	5. *B365D*: Bet365 draw odds
+  6. *B365A*: Bet365 away win odds
+  7. *BWH*: Bet&Win home win odds
+  8. *BWD*: Bet&Win draw odds
+  9. *BWA*: Bet&Win away win odds
+  10. *IWH*: Interwetten home win odds
+  11. *IWD*: Interwetten draw odds
+  12. *IWA*: Interwetten away win odds
+  13. *LBH*: Ladbrokes home win odds
+  14. *LBD*: Ladbrokes draw odds
+  15. *LBA*: Ladbrokes away win odds
+  16. *VCH*: VC Bet home win odds
+  17. *VCD*: VC Bet draw odds
+  18. *VCA*: VC Bet away win odds
+  19. *WHH*: William Hill home win odds
+  20. *WHD*: William Hill draw odds
+  21. *WHA*: William Hill away win odds
+
+### Exploratory Data Analysis
+
+1. *Frequency of Results*:
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+ggplot(data, aes(FTR)) + geom_bar() + ggtitle('Frequency of Result')
+```
+
+Home team is more likely to win compare to Away Team or Draw Result. We can use Home Team as our Reference in Analysis
+
+2. Frequency of Games played by Teams at Home:
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 14, fig.height = 6}
+ggplot(data, aes(HomeTeam, fill = FTR)) + geom_bar() + ggtitle('Frequency of Wins per Home Team')
+```
+
+Not all teams played same number of home games. They can be categorized into 4 types based upon figure above. Overall home team is likely to win across all teams. 
+
+3. Frequency of Games played by Teams Away:
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 14, fig.height = 6}
+ggplot(data, aes(AwayTeam, fill = FTR)) + geom_bar() + ggtitle('Frequency of Wins per Away Team')
+``` 
+
+Not all teams played same number of away games. They can be categorized into 4 types based upon figure above. Overall home team is likely to win across all teams. One thing to notice is that number of home games played by a team are equal to number of away games played.
+
+4. Average Ratings per Result type for Home Team
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 16}
+query <- paste("SELECT ", paste('avg(', colnames(data)[6:23], '),', collapse = ""), " HomeTeam, FTR ",
+               "FROM data
+                GROUP BY HomeTeam, FTR", sep = "")
+avg_data <- sqldf(query)
+colnames(avg_data) <- c(paste('avg', colnames(data)[6:23], sep = "_"), "HomeTeam", "FTR")
+l_avg_data <- alply(avg_data[ ,-c(19, 20)], 2, function(x){
+                                                 y <- cbind(x, avg_data[ ,c(19, 20)])
+                                                 colnames(y)[1] <- "Avg_Odds"
+                                                 return(y)})
+n_avg_data <- ldply(l_avg_data, function(x){x})
+colnames(n_avg_data)[1] <- "Bid"
+n_avg_data[ ,1] <- gsub("avg_", "", n_avg_data[ ,1])
+ggplot(n_avg_data, aes(x = HomeTeam, y = Avg_Odds, colour = FTR)) + facet_wrap( ~Bid, nrow = 6, ncol = 3) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+xlab('Home Teams') + ylab('Avg Odds') +
+ggtitle('Avg Odds by Bidder across Home Teams')
+```
+
+Bidding average for home team win are more than draw and draw is slightly more than losing. Also some teams have high average for bid value across compared to other teams and in such cases the bid value of losing is low
+
+5. Average Ratings per Result type for Away Team
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 16}
+query <- paste("SELECT ", paste('avg(', colnames(data)[6:23], '),', collapse = ""), " AwayTeam, FTR ",
+               "FROM data
+                GROUP BY AwayTeam, FTR", sep = "")
+avg_data <- sqldf(query)
+colnames(avg_data) <- c(paste('avg', colnames(data)[6:23], sep = "_"), "AwayTeam", "FTR")
+l_avg_data <- alply(avg_data[ ,-c(19, 20)], 2, function(x){
+                                                 y <- cbind(x, avg_data[ ,c(19, 20)])
+                                                 colnames(y)[1] <- "Avg_Odds"
+                                                 return(y)})
+n_avg_data <- ldply(l_avg_data, function(x){x})
+colnames(n_avg_data)[1] <- "Bid"
+n_avg_data[ ,1] <- gsub("avg_", "", n_avg_data[ ,1])
+ggplot(n_avg_data, aes(x = AwayTeam, y = Avg_Odds, colour = FTR)) + facet_wrap( ~Bid, nrow = 6, ncol = 3) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+xlab('Away Teams') + ylab('Avg Odds') +
+ggtitle('Avg Odds by Bidder across Away Teams')
+```
+
+This reflects almost mirror results of the above graph away team has low bid value of winning and the teams which have high bid value of winning home have more bid value of winning away game too.
+
+### Conclusion
+- Successfully used the ggplot2 to explore the interactions between different independent variables.
