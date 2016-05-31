@@ -16,6 +16,7 @@ library(randomForest)
 library(psych)
 library(NbClust)
 library(proxy)
+library(skmeans)
 
 stack_url <- 'https://stackoverflow.com/jobs/feed?searchTerm=big+data'
 stack_feed <- getURL(stack_url)
@@ -28,20 +29,19 @@ for(url in stack_feed_urls){
   job_html <- htmlParse(job_url)
   job_description <- gsub("[[:space:]]", " ", unlist(xpathApply(job_html, '//ul', xmlValue)))
   job_title <- gsub("[[:space:]]|[[:punct:]]|'|", "", unlist(xpathApply(job_html, '//h1', xmlValue))[1])
-  write.table(job_description[7:length(job_description)], paste(job_title, "_", cnt, ".txt", sep = ""), 
+  write.table(job_description[7:length(job_description)], paste("jobs/", job_title, "_", cnt, ".txt", sep = ""), 
               col.names = F, row.names = F, quote = FALSE)
   print(cnt)
   cnt <- cnt + 1
 }
 
-job_load <- function(){
-  path <- file.path(getwd())  
+job_load <- function(path){
   filenames <- dir(path)
   job_details <- Corpus(DirSource(path))   
   return(job_details)
 }
 
-job_view <- job_load()
+job_view <- job_load("jobs/")
 
 rmv_words <- c("able", "ability", "across", "analysis", "based", "buy", "can", "candidates", 
                "chef", "closely", "company", "competitive", "conditions", "continuous", "ensure", "enterprise",
@@ -55,6 +55,9 @@ review_clean <- function(docs){
     return(x)
   })
   docs <- Corpus(VectorSource(docs))
+  for(j in seq(docs)){
+    docs[[j]] <- gsub("C#", "Csharp", docs[[j]])
+  }
   docs <- tm_map(docs, removePunctuation)
   docs <- tm_map(docs, removeNumbers)   
   docs <- tm_map(docs, tolower)   
@@ -71,6 +74,8 @@ review_clean <- function(docs){
     docs[[j]] <- gsub("written", "write", docs[[j]])
     docs[[j]] <- gsub("front end", "frontend", docs[[j]])
     docs[[j]] <- gsub("amazon web services", "aws", docs[[j]])
+    docs[[j]] <- gsub("big data", "bigdata", docs[[j]])
+    docs[[j]] <- gsub("web application", "webapplication", docs[[j]])
   }
   docs <- tm_map(docs, stemDocument)   
   docs <- tm_map(docs, stripWhitespace)
@@ -119,14 +124,76 @@ review_format <- function(res){
   final_dtms <- final_dtms[-nrow(final_dtms), ]
   return(final_dtms)
 }
-pos_data <- data.frame(review_format(pos_res))
-pos_data <- apply(pos_data, 2, as.numeric)
-rownames(pos_data) <- list.files()
+job_data <- data.frame(review_format(pos_res))
+job_data <- apply(job_data, 2, as.numeric)
+rownames(job_data) <- list.files("jobs/")
 
-fit <- principal(pos_data, nfactors = dim(pos_data)[2], rotate="varimax")
-fit
+pos_rate <- c("advanced", "best", "big", "complex", "deep", "excellent", "experience", "expert", "great", "lead")
+neutral_rate <- c("familiarity", "good", "help", "understand")
+skills <- setdiff(colnames(job_data), c(pos_rate, neutral_rate))
 
-distances <- dist(pos_data, method="cosine")
+titles <- list.files("jobs/")
+
+final_data <- data.frame(matrix(0, nrow = nrow(job_data), ncol = (3*length(skills))))
+rownames(final_data) <- list.files("jobs/")
+colnames(final_data) <- c(paste(skills,"pos", sep = "_"), paste(skills,"neut", sep = "_"), paste(skills,"neg", sep = "_"))
+
+post_review_clean <- function(docs){
+  docs <- llply(docs, function(x){
+    return(x)
+  })
+  docs <- Corpus(VectorSource(docs))
+  for(j in seq(docs)){
+    docs[[j]] <- gsub("C#", "Csharp", docs[[j]])
+  }
+  docs <- tm_map(docs, removePunctuation)
+  docs <- tm_map(docs, removeNumbers)   
+  docs <- tm_map(docs, tolower)   
+  docs <- tm_map(docs, removeWords, c(stopwords("english"), rmv_words)) 
+  for(j in seq(docs)){
+    docs[[j]] <- gsub("applic", "application", docs[[j]])
+    docs[[j]] <- gsub("architecture", "architect", docs[[j]])
+    docs[[j]] <- gsub("amazonwebservices", "aws", docs[[j]])
+    docs[[j]] <- gsub("bachelorâ..s", "bachelors", docs[[j]])
+    docs[[j]] <- gsub("environ", "environment", docs[[j]])
+    docs[[j]] <- gsub("expertise", "expert", docs[[j]])
+    docs[[j]] <- gsub("highly", "high", docs[[j]])
+    docs[[j]] <- gsub("scalable", "scale", docs[[j]])
+    docs[[j]] <- gsub("written", "write", docs[[j]])
+    docs[[j]] <- gsub("front end", "frontend", docs[[j]])
+    docs[[j]] <- gsub("amazon web services", "aws", docs[[j]])
+    docs[[j]] <- gsub("big data", "bigdata", docs[[j]])
+    docs[[j]] <- gsub("web application", "webapplication", docs[[j]])
+  }
+  docs <- tm_map(docs, stemDocument)   
+  docs <- tm_map(docs, PlainTextDocument) 
+  
+  for(j in seq(docs)){
+    print(j)
+    job_descrptn <- as.character(docs[[j]])
+    for(line in job_descrptn){
+      line_modified <- strsplit(line, split = "  ")
+      for(newline in line_modified[[1]]){
+        for(skill in skills){
+          if(length(grep(skill, newline)) == 1){
+            if(gregexpr(paste(pos_rate, collapse  = "|"), newline)[[1]][1] > 0){
+              final_data[j, paste(skill, "pos", sep = "_")] <- 1
+            } else if(gregexpr(paste(neutral_rate, collapse  = "|"), newline)[[1]][1] > 0){
+              final_data[j, paste(skill, "neut", sep = "_")] <- 1
+            } else {
+              final_data[j, paste(skill, "neg", sep = "_")] <- 1
+            }
+          } 
+        }
+      }
+    }
+  }
+  return(final_data)
+}
+final_job_data <- post_review_clean(job_view)
+final_job_data <- final_job_data[ ,apply(final_job_data, 2, function(x){min(x) != max(x)})]
+
+distances <- dist(final_job_data, method="cosine")
 
 # Hierarchical clustering
 clusterUsers_Ward <- hclust(distances, method = "ward.D") 
@@ -135,42 +202,7 @@ clusterUsers_Average <- hclust(distances, method = "average")
 # Plot the dendrogram
 plot(clusterUsers_Ward)
 plot(clusterUsers_Average)
-
-cluster_stats <- function(data, k){
-  cluster <- kmeans(data, k)
-  RMS_STD <- sqrt(cluster$withinss/cluster$size)
-  cluster_distances <- data.frame(as.matrix(dist(cluster$centers, diag = TRUE, upper = TRUE)))
-  nearest_clusters_stats <- alply(cluster_distances, 1, function(x){
-    return(list(distance = min(x[x > 0]), cluster = which(x == min(x[x > 0]))))
-  })
-  nearest_clusters_stats <- ldply(nearest_clusters_stats, function(x){
-    return(c(x$distance, x$cluster))
-  })
-  nearest_clusters_stats <- nearest_clusters_stats[  ,-c(1:dim(nearest_clusters_stats)[1])]
-  result <- cbind(data.frame(cluster$size), cbind(data.frame(RMS_STD), nearest_clusters_stats))
-  colnames(result) <- c("Frequency", "RMS_STD", "CentroidDistance", "NearestCluster")
-  return(result)
-}
-
-clusterUsers_Ward$call <- NULL
-ccc_stat <- NbClust(pos_data, distance = "euclidean", min.nc = 2, max.nc = 20, 
-                    method = "ward.D", index = "ccc")
-names(ccc_stat)
-plot(ccc_stat$All.index)
-
-pseudot2_stat <- NbClust(pos_data, distance = "euclidean", min.nc = 2, max.nc = 20, 
-                         method = "ward.D", index = "pseudot2")
-
-plot(pseudot2_stat$All.index)
-
-
-pseudof_stat <- NbClust(pos_data, distance = "euclidean", min.nc = 2, max.nc = 20, 
-                        method = "ward.D", index = "ch")
-
-plot(pseudof_stat$All.index)
-
-print(cluster_stats(data = pos_data, k = 2))
-cluster <- kmeans(pos_data, 2)
+cluster <- kmeans(final_job_data, 2)
 
 ######Contrasting Features
 #Cluster1: neutral 
@@ -179,17 +211,16 @@ cluster <- kmeans(pos_data, 2)
 #expert, experience, engine, distributed, develop, design, data, cloud, business, build, automation, agile, analytics,
 #Neutral: advanced, android, api, aws, backend, create, daily, 
 
-fit <- skmeans(pos_data, 3)
-library(cluster) 
-clusplot(pos_data, fit$cluster, color=TRUE, shade=TRUE, 
+fit <- skmeans(as.matrix(final_job_data), 3)
+clusplot(final_job_data, fit$cluster, color=TRUE, shade=TRUE, 
          labels=2, lines=0)
 
 
-cluster1 <- rownames(pos_data)[which(fit$cluster == 1)]
-cluster2 <- rownames(pos_data)[which(fit$cluster == 2)]
-cluster3 <- rownames(pos_data)[which(fit$cluster == 3)]
+cluster1 <- rownames(final_job_data)[which(fit$cluster == 1)]
+cluster2 <- rownames(final_job_data)[which(fit$cluster == 2)]
+cluster3 <- rownames(final_job_data)[which(fit$cluster == 3)]
 
 x <- NULL
 for(rows in 1:3){
-  x <- rbind(x, apply(pos_data[which(fit$cluster == rows), ], 2, sum))
+  x <- rbind(x, apply(final_job_data[which(fit$cluster == rows), ], 2, mean))
 }#spherical k-means. You may want to try CLUTO
