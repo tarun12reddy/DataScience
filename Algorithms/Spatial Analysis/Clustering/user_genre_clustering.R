@@ -98,8 +98,6 @@ distances <- dist(user_genre)
 clusterUsers_Ward <- hclust(distances, method = "ward.D") 
 clusterUsers_Average <- hclust(distances, method = "average")
 
-<<<<<<< HEAD
-=======
 # Plot the dendrogram
 plot(clusterUsers_Ward)
 plot(clusterUsers_Average)
@@ -145,4 +143,3 @@ cluster_stats <- function(cluster){
   colnames(result) <- c("RMS_STD", "CentroidDistance", "NearestCluster")
   return(result)
 }
->>>>>>> 4cd6c9069c6c04d3d4c2551e591d58bdaf1b2b04

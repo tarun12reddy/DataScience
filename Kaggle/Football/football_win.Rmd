@@ -1,0 +1,517 @@
+---
+title: "Football_Win"
+author: "Tarun Reddy Aleti"
+date: "February 29, 2016"
+output: html_document
+---
+
+### Executive Summary
+- The data set at hand covers all the "Serie A" football matches for the last 8 years of Italian Football League.
+- Our goal is to predict the final result, having at your disposal the odds of various bookmakers.
+- Need to use 6 years of data and predict the result for next 2 years.
+- Best model is the one which predicts accurately more often.
+- The dataset for the model can be downloaded from [train](https://inclass.kaggle.com/c/football-data-challenge/download/train.csv), [test](https://inclass.kaggle.com/c/football-data-challenge/download/test.csv)
+
+#### Required Packages
+
+Following packages are required for the code to run efficiently.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+library(MASS)
+library(rjson)
+library(plyr)
+library(knitr)
+library(caret)
+library(fmsb)
+library(e1071)
+library(randomForest)
+library(caretEnsemble)
+library(ROCR)
+library(ineq)
+library(zipcode)
+library(sqldf)
+library(ggplot2)
+library(lubridate)
+library(psych)
+```
+
+#### Preliminary Analysis
+
+For the code to execute, all the datasets should be in the R working directory. The datasets are in .csv format.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+set.seed(1)
+data <- read.csv("train.csv", header = TRUE, stringsAsFactors = FALSE)
+```
+
+- The data set under consideration has a total of **`r nrow(data)`** rows and **`r ncol(data)-2`** independent variables. Our dependent variable is *FTR (Full Time Result)* and is a categorical variable, wherein **A** indicates that Away team won, **H** indicates that home team won and **D** indicates that result was a draw
+- Independent Variables are as follows
+
+	1. *Date*: Indicates when the match was played
+		+ Can extract Weekday/Weekend, DayofWeek and Month information
+	2. *HomeTeam*: Name of Home Team in the match
+		+ There are `r length(levels(as.factor(data$HomeTeam)))` different teams. We might need to create dummy variables for them.
+		+ The team names are `r unique(data$HomeTeam)`.
+	3. *AwayTeam*: Name of Away Team in the match
+		+ There are `r length(levels(as.factor(data$AwayTeam)))` different teams. We might need to create dummy variables for them.
+		+ The team names are `r unique(data$AwayTeam)`.
+		+ There are same number of Home Teams as Away Teams
+	4. *B365H*: Bet365 home win odds
+	5. *B365D*: Bet365 draw odds
+  6. *B365A*: Bet365 away win odds
+  7. *BWH*: Bet&Win home win odds
+  8. *BWD*: Bet&Win draw odds
+  9. *BWA*: Bet&Win away win odds
+ 10. *IWH*: Interwetten home win odds
+ 11. *IWD*: Interwetten draw odds
+ 12. *IWA*: Interwetten away win odds
+ 13. *LBH*: Ladbrokes home win odds
+ 14. *LBD*: Ladbrokes draw odds
+ 15. *LBA*: Ladbrokes away win odds
+ 16. *VCH*: VC Bet home win odds
+ 17. *VCD*: VC Bet draw odds
+ 18. *VCA*: VC Bet away win odds
+ 19. *WHH*: William Hill home win odds
+ 20. *WHD*: William Hill draw odds
+ 21. *WHA*: William Hill away win odds
+
+### Exploratory Data Analysis
+
+1. *Frequency of Results*:
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+ggplot(data, aes(FTR)) + geom_bar() + ggtitle('Frequency of Result')
+```
+
+Home team is more likely to win compare to Away Team or Draw Result. We can use Home Team as our Reference in Analysis
+
+2. Frequency of Games played by Teams at Home:
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 14, fig.height = 6}
+ggplot(data, aes(HomeTeam, fill = FTR)) + geom_bar() + ggtitle('Frequency of Wins per Home Team')
+```
+
+Not all teams played same number of home games. They can be categorized into 4 types based upon figure above. Overall home team is likely to win across all teams. 
+
+3. Frequency of Games played by Teams Away:
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 14, fig.height = 6}
+ggplot(data, aes(AwayTeam, fill = FTR)) + geom_bar() + ggtitle('Frequency of Wins per Away Team')
+``` 
+
+Not all teams played same number of away games. They can be categorized into 4 types based upon figure above. Overall home team is likely to win across all teams. One thing to notice is that number of home games played by a team are equal to number of away games played.
+
+4. Average Ratings per Result type for Home Team
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 16}
+query <- paste("SELECT ", paste('avg(', colnames(data)[6:23], '),', collapse = ""), " HomeTeam, FTR ",
+               "FROM data
+                GROUP BY HomeTeam, FTR", sep = "")
+avg_data <- sqldf(query)
+colnames(avg_data) <- c(paste('avg', colnames(data)[6:23], sep = "_"), "HomeTeam", "FTR")
+l_avg_data <- alply(avg_data[ ,-c(19, 20)], 2, function(x){
+                                                 y <- cbind(x, avg_data[ ,c(19, 20)])
+                                                 colnames(y)[1] <- "Avg_Odds"
+                                                 return(y)})
+n_avg_data <- ldply(l_avg_data, function(x){x})
+colnames(n_avg_data)[1] <- "Bid"
+n_avg_data[ ,1] <- gsub("avg_", "", n_avg_data[ ,1])
+ggplot(n_avg_data, aes(x = HomeTeam, y = Avg_Odds, colour = FTR)) + facet_wrap( ~Bid, nrow = 6, ncol = 3) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+xlab('Home Teams') + ylab('Avg Odds') +
+ggtitle('Avg Odds by Bidder across Home Teams')
+```
+
+Bidding average for home team win are more than draw and draw is slightly more than losing. Also some teams have high average for bid value across compared to other teams and in such cases the bid value of losing is low
+
+5. Average Ratings per Result type for Away Team
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 16}
+query <- paste("SELECT ", paste('avg(', colnames(data)[6:23], '),', collapse = ""), " AwayTeam, FTR ",
+               "FROM data
+                GROUP BY AwayTeam, FTR", sep = "")
+avg_data <- sqldf(query)
+colnames(avg_data) <- c(paste('avg', colnames(data)[6:23], sep = "_"), "AwayTeam", "FTR")
+l_avg_data <- alply(avg_data[ ,-c(19, 20)], 2, function(x){
+                                                 y <- cbind(x, avg_data[ ,c(19, 20)])
+                                                 colnames(y)[1] <- "Avg_Odds"
+                                                 return(y)})
+n_avg_data <- ldply(l_avg_data, function(x){x})
+colnames(n_avg_data)[1] <- "Bid"
+n_avg_data[ ,1] <- gsub("avg_", "", n_avg_data[ ,1])
+ggplot(n_avg_data, aes(x = AwayTeam, y = Avg_Odds, colour = FTR)) + facet_wrap( ~Bid, nrow = 6, ncol = 3) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+xlab('Away Teams') + ylab('Avg Odds') +
+ggtitle('Avg Odds by Bidder across Away Teams')
+```
+
+This reflects almost mirror results of the above graph away team has low bid value of winning and the teams which have high bid value of winning home have more bid value of winning away game too.
+
+6. Time Analysis
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+data$Month <- as.factor(month(data$Date))
+levels(data$Month) <- c("Jan", "Feb", "Mar", "Apr", "May", "Aug", "Sep", "Oct", "Nov", "Dec")
+data$DayofWeek <- as.factor(as.POSIXlt(data$Date)$wday)
+data$DayofWeek <- factor(data$DayofWeek, levels(data$DayofWeek)[c(2:7, 1)])
+levels(data$DayofWeek) <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+data$DayType <- 'Weekend'
+data[data$DayofWeek != 'Sat' & data$DayofWeek != 'Sun', 'DayType'] <- 'Weekday'
+```
+
+- Frequency of Games per Month
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+ggplot(data, aes(Month)) + geom_bar() + ggtitle('Frequency of Months Games played')
+```
+
+  + No matches are played in June and July. And very few matches in May. Rest of the months its pretty uniform.
+  
+- Frequency of Home Games per Team in Months
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 12, fig.height = 8}
+ggplot(data, aes(HomeTeam, fill = Month)) + geom_bar() + ggtitle('Frequency of Home Games played in a Month') + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+  + Games played at Home for a team are spread quite proportionally as per number of games played in total
+
+- Frequency of Away Games per Team in Months
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 12, fig.height = 8}
+ggplot(data, aes(AwayTeam, fill = Month)) + geom_bar() + ggtitle('Frequency of Away Games played in a Month') + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+  + Games played Away for a team are spread quite proportionally as per number of games played in total
+
+- Average Bidding in Various Months
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+query <- paste("SELECT ", paste('avg(', colnames(data)[6:23], '),', collapse = ""), " Month, FTR ",
+               "FROM data
+                GROUP BY Month, FTR", sep = "")
+avg_data <- sqldf(query)
+colnames(avg_data) <- c(paste('avg', colnames(data)[6:23], sep = "_"), "Month", "FTR")
+l_avg_data <- alply(avg_data[ ,-c(19, 20)], 2, function(x){
+                                                 y <- cbind(x, avg_data[ ,c(19, 20)])
+                                                 colnames(y)[1] <- "Avg_Odds"
+                                                 return(y)})
+n_avg_data <- ldply(l_avg_data, function(x){x})
+colnames(n_avg_data)[1] <- "Bid"
+n_avg_data[ ,1] <- gsub("avg_", "", n_avg_data[ ,1])
+ggplot(n_avg_data, aes(x = Month, y = Avg_Odds, colour = FTR)) + facet_wrap( ~Bid, nrow = 6, ncol = 3) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+xlab('Months') + ylab('Avg Odds') +
+ggtitle('Avg Odds by Bidder across Months')
+```
+
+  + For couple of teams in couple of months big is slightly high and low but overall its almost constant across teams in months
+
+- Frequency of Games per Day of Week
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+ggplot(data, aes(DayofWeek), order = as.Date(Date)) + geom_bar() + ggtitle('Frequency of Games played as per Day of Week')
+```
+
+  + Most of the Games are played during mid week, Saturday and Sunday
+  
+- Frequency of Home Games per Team as per Day of Week
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 12, fig.height = 8}
+ggplot(data, aes(HomeTeam, fill = DayofWeek)) + geom_bar() + ggtitle('Frequency of Home Games played as per Day of Week') + theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+ 
+ + Games played at Home for a team on a given Weekday spread quite proportionally as per number of games played in total on that Day of Week
+ 
+- Frequency of Away Games per Team as per Day of Week
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 12, fig.height = 8}
+ggplot(data, aes(AwayTeam, fill = DayofWeek)) + geom_bar() + ggtitle('Frequency of Away Games played as per Day of Week') + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+  +  Games played at Away for a team on a given Weekday spread quite proportionally as per number of games played in total on that Day of Week
+  
+- Average Bidding Across Day of Week
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+query <- paste("SELECT ", paste('avg(', colnames(data)[6:23], '),', collapse = ""), " DayofWeek, FTR ",
+               "FROM data
+                GROUP BY DayofWeek, FTR", sep = "")
+avg_data <- sqldf(query)
+colnames(avg_data) <- c(paste('avg', colnames(data)[6:23], sep = "_"), "DayofWeek", "FTR")
+l_avg_data <- alply(avg_data[ ,-c(19, 20)], 2, function(x){
+                                                 y <- cbind(x, avg_data[ ,c(19, 20)])
+                                                 colnames(y)[1] <- "Avg_Odds"
+                                                 return(y)})
+n_avg_data <- ldply(l_avg_data, function(x){x})
+colnames(n_avg_data)[1] <- "Bid"
+n_avg_data[ ,1] <- gsub("avg_", "", n_avg_data[ ,1])
+ggplot(n_avg_data, aes(x = DayofWeek, y = Avg_Odds, colour = FTR)) + facet_wrap( ~Bid, nrow = 6, ncol = 3) + geom_point() + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+xlab('Day of Week') + ylab('Avg Odds') +
+ggtitle('Avg Odds by Bidder across Day of Week')
+```
+
+  + Bidding across day of Week is uniform unlike the trend we seen for Months
+  
+### Dummy Variables
+
+First we need to create dummy variables for all the categorical variables like HomeTeam, AwayTeam, Month, DayofWeek and DayType
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+fac_var <- c("HomeTeam", "AwayTeam", "Month", "DayofWeek", "DayType")
+
+for(var in fac_var){
+	data[ ,var] <- as.factor(data[ ,var])
+}
+
+dumm_var <- fac_var
+final_data <- data
+
+for(dumm in dumm_var){
+	dumm_data <- model.matrix( ~ data[ ,dumm] - 1, data = data)
+	colnames(dumm_data) <- paste(dumm, gsub("data|, dumm|[[:punct:]]", "", colnames(dumm_data)), sep = "_")
+	final_data <- cbind(final_data, dumm_data)
+}
+
+colnames(final_data) <- gsub(" ", "", colnames(final_data))
+final_data$FTR <- as.factor(final_data$FTR)
+```
+
+### Missing data - Data Imputation
+
+The bid odds have data missing with `r sum(is.na(final_data[ ,'B365H']))` for Bet365, `r sum(is.na(final_data[ ,'BWH']))` for Bet&Win, `r sum(is.na(final_data[ ,'IWH']))` for InterWetten, `r sum(is.na(final_data[ ,'LBH']))` for Ladbrokes and `r sum(is.na(final_data[ ,'WHH']))` for WilliamHill and `r sum(is.na(final_data[ ,'VCH']))` for VC Bet. We need to impute data for each of them. 
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+for(bet in colnames(final_data)[3:20]){
+  missing_bet <- data[(is.na(final_data[ ,bet])), ]
+  for(i in 1:dim(missing_bet)[1]){
+    x <- data[data$HomeTeam == missing_bet[i, 'HomeTeam'] & data$AwayTeam == missing_bet[i, 'AwayTeam'], ]
+    if(dim(x)[1] == 1){
+      x <- data[(data$HomeTeam == missing_bet[i, 'HomeTeam'] | data$AwayTeam == missing_bet[i, 'AwayTeam']) & year(data$Date) == year(missing_bet[i, 'Date']), ]
+    }
+    x$rate <- 1
+    x[x[ ,'FTR'] == missing_bet[i, 'FTR'], 'rate'] <- 2
+    final_data[which(is.na(data[ ,bet]))[i], bet] <- sum(x$rate * x[ ,bet], na.rm = TRUE)/sum(x$rate, na.rm = TRUE)
+  }
+}
+
+```
+
+Used other records available for same home team and away team and imputed using weighted mean of the data where data with same result is given twice the weightage compared with other data.
+
+### Near Zero Variance
+ 
+We need not consider independent variables which do not enough variance in itself. We can use nzv of caret package for this analysis. Following `r length(colnames(final_data)[nzv(final_data)])` variables have near zero variance and we need not consider them further: `r colnames(final_data)[nzv(final_data)]`
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+nzv_var <- nzv(final_data)
+final_data <- final_data[ ,-nzv_var]
+```
+
+### Creating Train and Test Samples
+
+- We have a total of **`r nrow(final_data)`** rows and **`r ncol(final_data)-2`** independent variables. Now that we have a clean data set before we head to modeling, we need to create a train and test data sets. Since we need to eventually predict on 2 years of data we can use 4 years to train (2008 to 2011) and 2 year to test (2013 and 2014).
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train <- final_data[year(final_data$Date) < 2013, -1]
+test <- final_data[year(final_data$Date) >= 2013, -1]
+```
+
+- Size of train data set is **`r nrow(train)`** and test data set is **`r nrow(test)`**
+
+### Outlier Removal
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train <- train[train[ ,'B365H'] < (mean(train[ ,'B365H']) + 2.58 * sd(train[ ,'B365H'])) &
+               train[ ,'B365H'] > (mean(train[ ,'B365H']) - 2.58 * sd(train[ ,'B365H'])) &
+               train[ ,'B365D'] < (mean(train[ ,'B365D']) + 2.58 * sd(train[ ,'B365D'])) &
+               train[ ,'B365D'] > (mean(train[ ,'B365D']) - 2.58 * sd(train[ ,'B365D'])) &
+               train[ ,'B365A'] < (mean(train[ ,'B365A']) + 2.58 * sd(train[ ,'B365A'])) &
+               train[ ,'B365A'] > (mean(train[ ,'B365A']) - 2.58 * sd(train[ ,'B365A'])) &
+               train[ ,'BWH'] < (mean(train[ ,'BWH']) + 2.58 * sd(train[ ,'BWH'])) &
+               train[ ,'BWH'] > (mean(train[ ,'BWH']) - 2.58 * sd(train[ ,'BWH'])) &
+               train[ ,'BWD'] < (mean(train[ ,'BWD']) + 2.58 * sd(train[ ,'BWD'])) &
+               train[ ,'BWD'] > (mean(train[ ,'BWD']) - 2.58 * sd(train[ ,'BWD'])) &
+               train[ ,'BWA'] < (mean(train[ ,'BWA']) + 2.58 * sd(train[ ,'BWA'])) &
+               train[ ,'BWA'] > (mean(train[ ,'BWA']) - 2.58 * sd(train[ ,'BWA'])) &
+               train[ ,'IWH'] < (mean(train[ ,'IWH']) + 2.58 * sd(train[ ,'IWH'])) &
+               train[ ,'IWH'] > (mean(train[ ,'IWH']) - 2.58 * sd(train[ ,'IWH'])) &
+               train[ ,'IWD'] < (mean(train[ ,'IWD']) + 2.58 * sd(train[ ,'IWD'])) &
+               train[ ,'IWD'] > (mean(train[ ,'IWD']) - 2.58 * sd(train[ ,'IWD'])) &
+               train[ ,'IWA'] < (mean(train[ ,'IWA']) + 2.58 * sd(train[ ,'IWA'])) &
+               train[ ,'IWA'] > (mean(train[ ,'IWA']) - 2.58 * sd(train[ ,'IWA'])) &
+               train[ ,'LBH'] < (mean(train[ ,'LBH']) + 2.58 * sd(train[ ,'LBH'])) &
+               train[ ,'LBH'] > (mean(train[ ,'LBH']) - 2.58 * sd(train[ ,'LBH'])) &
+               train[ ,'LBD'] < (mean(train[ ,'LBD']) + 2.58 * sd(train[ ,'LBD'])) &
+               train[ ,'LBD'] > (mean(train[ ,'LBD']) - 2.58 * sd(train[ ,'LBD'])) &
+               train[ ,'LBA'] < (mean(train[ ,'LBA']) + 2.58 * sd(train[ ,'LBA'])) &
+               train[ ,'LBA'] > (mean(train[ ,'LBA']) - 2.58 * sd(train[ ,'LBA'])) &
+               train[ ,'WHH'] < (mean(train[ ,'WHH']) + 2.58 * sd(train[ ,'WHH'])) &
+               train[ ,'WHH'] > (mean(train[ ,'WHH']) - 2.58 * sd(train[ ,'WHH'])) &
+               train[ ,'WHD'] < (mean(train[ ,'WHD']) + 2.58 * sd(train[ ,'WHD'])) &
+               train[ ,'WHD'] > (mean(train[ ,'WHD']) - 2.58 * sd(train[ ,'WHD'])) &
+               train[ ,'WHA'] < (mean(train[ ,'WHA']) + 2.58 * sd(train[ ,'WHA'])) &
+               train[ ,'WHA'] > (mean(train[ ,'WHA']) - 2.58 * sd(train[ ,'WHA'])) &
+               train[ ,'VCH'] < (mean(train[ ,'VCH']) + 2.58 * sd(train[ ,'VCH'])) &
+               train[ ,'VCH'] > (mean(train[ ,'VCH']) - 2.58 * sd(train[ ,'VCH'])) &
+               train[ ,'VCD'] < (mean(train[ ,'VCD']) + 2.58 * sd(train[ ,'VCD'])) &
+               train[ ,'VCD'] > (mean(train[ ,'VCD']) - 2.58 * sd(train[ ,'VCD'])) &
+               train[ ,'VCA'] < (mean(train[ ,'VCA']) + 2.58 * sd(train[ ,'VCA'])) &
+               train[ ,'VCA'] > (mean(train[ ,'VCA']) - 2.58 * sd(train[ ,'VCA'])), ]
+```
+
+- For the continuous independent variables, we have to remove outliers that fall beyond 2.58 times the standard deviation on either side of the mean of that variable (2.58 signifies the two sided 99.5% confidence). 
+*Note: Removed outliers after creating a train and test data sets, inorder to make sure how the performance will be in test set even with presence of outliers*
+- The train data set has now **`r nrow(train)`** rows and **`r ncol(train)-1`** columns.
+
+### Correlation
+
+Final check we need to do is correlation among the independent continuous variables. If they have high correlation then we may use Principal Component Analysis or Factor Analysis.
+There are `r sum(cor(train[ ,c(2:19)]) > 0.8 & cor(train[ ,c(2:19)]) < 1)/2` correlations that have more than 0.8 value, indicating very high correlation in the continuous independent variable. Need to normalize the data before performing factor analysis
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+train_mean <- apply(train[ ,c(2:19)], 2, mean)
+train_sd <- apply(train[ ,c(2:19)], 2, sd)
+for(i in 2:19){
+  train[ ,i] <- (train[ ,i] - train_mean[i-1])/train_sd[i-1]
+  test[ ,i] <- (test[ ,i] - train_mean[i-1])/train_sd[i-1]
+}
+
+fit <- principal(train[ ,c(2:19)], nfactors=18, rotate="varimax")
+fit$loadings
+```
+
+The first three principal components explain the variance present in all the 18 variables. First factor describes preference of home team winning against draw or losing (all the home bids have high positive value, while draw and away have low values), second factor shows home team not winning against draw or losing (home bids have negative value, while draw or away have high positive values), third factor shows preference for draw or away team winning (only draw and away have mostly positive values). We can define these components as StrongHome, StrongDrawWeakAway and WeakDrawStrongAway.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(train[ ,c(2:19)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
+test[ ,c('StrongHome', 'StrongDrawWeakAway', 'WeakDrawStrongAway')] <- data.matrix(test[ ,c(2:19)]) %*% data.matrix(fit$loadings[ ,c('PC1', 'PC2', 'PC3')])
+
+train <- train[ ,-c(2:19)]
+test <- test[ ,-c(2:19)]
+```
+
+
+### Collinearity Diagnostics
+
+Before moving to modeling, we need to make sure that none of our independent variables have a collinearity among themselves. One way to ensure this is using the [Variance Influence Factor](https://onlinecourses.science.psu.edu/stat501/node/347). In general any value greater than 10 is considered high collinearity.
+*(Note: Source for below [vif_func](http://stats.stackexchange.com/questions/87278/finding-the-best-linear-model-for-each-response-variable-in-multivariate-multipl) function).*
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+vif_func <- function(in_frame, thresh=10, trace=T){
+	#get initial vif value for all comparisons of variables
+	vif_init<-NULL
+	var_names <- names(in_frame)
+	for(val in var_names){
+		regressors <- var_names[-which(var_names == val)]
+		form <- paste(regressors, collapse = '+')
+		form_in <- formula(paste(val, '~', form))
+		vif_init<-rbind(vif_init, c(val, VIF(lm(form_in, data = in_frame))))
+	}
+	vif_init <- vif_init[!is.nan(as.numeric(vif_init[ ,2])), ]
+	vif_max<-max(as.numeric(vif_init[,2]))
+	if(vif_max >= thresh){
+		in_dat<-in_frame
+		#backwards selection of explanatory variables, stops when all VIF values are below 'thresh'
+		while(vif_max >= thresh){
+			vif_vals<-NULL
+			var_names <- names(in_dat)
+			for(val in var_names){
+				regressors <- var_names[-which(var_names == val)]
+				form <- paste(regressors, collapse = '+')
+				form_in <- formula(paste(val, '~', form))
+				vif_add<-VIF(lm(form_in, data = in_dat))
+				vif_vals<-rbind(vif_vals,c(val,vif_add))
+			}
+			max_row<-which(vif_vals[,2] == max(as.numeric(vif_vals[,2])))[1]
+			vif_vals <- vif_vals[!is.nan(as.numeric(vif_vals[ ,2])), ]
+			vif_max<-as.numeric(vif_vals[max_row,2])
+			if(vif_max<thresh) break
+			in_dat<-in_dat[,!names(in_dat) %in% vif_vals[max_row,1]]
+
+		}
+	return(names(in_dat))
+	}
+}
+
+final_vars <- vif_func(in_frame = train[ ,-1])
+```
+
+`r length(setdiff(colnames(train), c('FTR', final_vars)))` independent variables `r setdiff(colnames(train), c('FTR', final_vars))` that were found to have high collinearity.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+train <- train[ ,c('FTR', final_vars)]
+test <- test[ ,c('FTR', final_vars)]
+```
+
+### [Multinominal Model](http://www.ats.ucla.edu/stat/r/dae/mlogit.htm)
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train$FTR <- relevel(train$FTR, ref = "H")
+logit_model <- multinom(as.formula(paste("FTR ~", paste(final_vars, collapse = " + "), sep = " ")), data = train)
+train_logit_predict <- fitted(logit_model)
+test_logit_predict <- predict(logit_model, newdata = test, "probs")
+train$pred_logit_FTR <- apply(train_logit_predict, 1, 
+                              function(x){
+                              return(colnames(train_logit_predict)[which(x == max(x))])
+                              })
+train_logit_accuracy <- sum(train$FTR == train$pred_logit_FTR)/dim(train)[1]
+train_logit_accuracy 
+test$pred_logit_FTR <- apply(test_logit_predict, 1,
+                             function(x){
+                              return(colnames(test_logit_predict)[which(x == max(x))])
+                              })
+test_logit_accuracy <- sum(test$FTR == test$pred_logit_FTR)/dim(test)[1]
+test_logit_accuracy 
+```
+
+### Random Forest
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 12, fig.height = 12}
+rf_model <- randomForest(as.formula(paste("FTR ~", paste(final_vars, collapse = " + "), sep = " ")), 
+                         data = train, importance=TRUE, ntree=2000)
+varImpPlot(rf_model)
+```
+
+StrongDrawWeakAway is the strongest model feature. Its suprising to see Month variables being significant in Mean Decrease Gini chart. 
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+train$pred_rf_FTR <- predict(rf_model, newdata = train)
+test$pred_rf_FTR <- predict(rf_model, newdata = test)
+table(test$FTR, test$pred_rf_FTR)
+train_rf_accuracy <- sum(train$FTR == train$pred_rf_FTR)/dim(train)[1]
+train_rf_accuracy 
+test_rf_accuracy <- sum(test$FTR == test$pred_rf_FTR)/dim(test)[1]
+test_rf_accuracy 
+```
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+rf_model1 <- cforest(as.formula(paste("FTR ~", paste(final_vars, collapse = " + "), sep = " ")), 
+                         data = train, controls=cforest_unbiased(ntree=2000, mtry=3))
+train$pred_rf1_FTR <- predict(rf_model1, newdata = train, OOB=TRUE, type = "response")
+test$pred_rf1_FTR <- predict(rf_model1, newdata = test, OOB=TRUE, type = "response")
+table(test$FTR, test$pred_rf1_FTR) 
+```
+
+confusion Matrix shows new model is inept in prediction
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+rf_model2 <- train(as.formula(paste("FTR ~", paste(final_vars, collapse = " + "), sep = " ")), 
+                data = train, method = "rf", trControl = trainControl(method = "cv",number = 5),
+                prox=TRUE,allowParallel=TRUE)
+train$pred_rf2_FTR <- predict(rf_model2, newdata = train)
+test$pred_rf2_FTR <- predict(rf_model2, newdata = test)
+table(test$FTR, test$pred_rf2_FTR)
+```
+
+confusion Matrix shows new model is inept in prediction
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+rf_model3 <- randomForest(as.formula("FTR ~ ."), data = train[ ,c(2:22)], importance=TRUE, ntree=2000)
+train$pred_rf3_FTR <- predict(rf_model3, newdata = train)
+test$pred_rf3_FTR <- predict(rf_model3, newdata = test)
+table(test$FTR, test$pred_rf3_FTR)
+```
+
+
+### Naive Bayes
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+nb_model <- naiveBayes(train[ ,final_vars], train[ ,'FTR'])
+train$pred_nb_FTR <- predict(nb_model, newdata = train)
+test$pred_nb_FTR <- predict(nb_model, newdata = test)
+```
