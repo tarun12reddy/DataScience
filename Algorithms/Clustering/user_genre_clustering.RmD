@@ -98,8 +98,6 @@ user_genre <- ldply(data, function(x){
 user_genre <- t(user_genre)
 rownames(user_genre) <- unique(ratings$user)
 colnames(user_genre) <- paste("avg", genres, "rating", sep = "_")
-<<<<<<< HEAD
-=======
 ```
 
 ### Reduction of Features
@@ -238,4 +236,3 @@ cluster_stats(data = user_genre, k = 14)
 	
 ### Conclusions
 Based upon above tables we see that Cluster 14 has clusters with size very small and 1 has a cluster with very large. Also looking at nearest neighbour, RMS_STD and Centroid Distance **9 Means Clustering** seems to be the best option.
->>>>>>> 4cd6c9069c6c04d3d4c2551e591d58bdaf1b2b04

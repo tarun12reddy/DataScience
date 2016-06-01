@@ -35,8 +35,4 @@ ls -alh
 6. RSA Keys
 ssh-keygen -t rsa -P ""
 cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
-<<<<<<< HEAD
 ssh localhost
-=======
-ssh localhost
->>>>>>> 4cd6c9069c6c04d3d4c2551e591d58bdaf1b2b04
