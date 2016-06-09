@@ -13,4 +13,3 @@ param (
 aws s3 rm --recursive s3://datasciencetarun/$S3Folder
 aws s3 mb s3://datasciencetarun/$S3Folder
 aws s3 cp $AWSPath\$LocalFolder\$FileName.zip s3://datasciencetarun/$S3Folder/$FileName.zip --acl public-read
-

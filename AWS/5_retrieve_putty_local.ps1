@@ -16,7 +16,7 @@ mget $csvExports"
 "$retrBatchFile" | set-content retr-batchfile.ftp -Encoding Ascii
 
 foreach ($i in $input) {
-	$procs = $procs + @(Start-Process -Passthru powershell "C:\Users\qaz\Desktop\psftp.exe $i -i C:\Users\qaz\Desktop\SourceTree_DataScience\AWS\Keys\key.ppk -l ec2-user -b retr-batchfile.ftp -bc")
+    $procs = $procs + @(Start-Process -Passthru powershell "C:\Users\qaz\Desktop\psftp.exe $i -i C:\Users\qaz\Desktop\SourceTree_DataScience\AWS\Keys\key.ppk -l ec2-user -b retr-batchfile.ftp -bc")
 }
 
 $procs | Wait-Process
