@@ -31,3 +31,4 @@ AWS/Hadoop_AWS_SingleNode.docx
 *.properties
 AWS/Keys/core-site.xml
 Algorithms/H2O/ec2_cmd.py
+*.7z
