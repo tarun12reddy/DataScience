@@ -8,7 +8,7 @@ for(job in unique_jobs){
   if(length(which(final_delete_jobs_df$y == job)) == 0){
     final_delete_jobs_df <- rbind(final_delete_jobs_df, delete_jobs_df)
   } else {
-    df_y = delete_jobs_df[is.na(match(delete_jobs_df$y, final_delete_jobs_df$y)), 'y']
+    df_y = delete_jobs_df[is.na(match(setdiff(delete_jobs_df$y, final_delete_jobs_df$x), final_delete_jobs_df$y)), 'y']
     if(length(df_y) > 0){
       print(cnt)
       delete_jobs_df <- data.frame(x = final_delete_jobs_df[which(final_delete_jobs_df$y == job)[1], 'x'],
@@ -18,8 +18,10 @@ for(job in unique_jobs){
   }
   cnt <- cnt+1
 }
-
+colnames(final_delete_jobs_df) <- c("Hold", "Delete")
+write.table(final_delete_jobs_df, "duplicate_stackoverflow_jobs.csv", col.names = T, row.names = F, quote = FALSE)
 current_files_in_directory <- list.files(path = "stackoverflow_jobs")
-dir.create("unique_stackoverflow_jobs")
-unique_files <- setdiff(as.character(current_files_in_directory), as.character(final_delete_jobs_df$y))
-file.copy(from=currentfiles, to = "uique_stackoverflow_jobs", copy.mode = TRUE)
+#dir.create("unique_stackoverflow_jobs")
+unique_files <- setdiff(as.character(current_files_in_directory), paste(as.character(final_delete_jobs_df$Delete), ".txt", sep = ""))
+setwd("~/stackoverflow_jobs")
+file.copy(from = unique_files, to = "../unique_stackoverflow_jobs",  copy.mode = TRUE)
