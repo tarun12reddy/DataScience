@@ -1,0 +1,332 @@
+---
+title: "Solution"
+author: "Tarun Reddy Aleti"
+date: "August 4, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Executive Summary
+- The data set at hand covers 10000 randomly selected job postings in IT Occupations.
+- Our goal is to do
+  - Preliminary Analysis: Impact of Occupations, skills and other variables on Time To Fill a position
+  - Exploration and Validate Analysis
+  - Identify groups of skills that increase time to fill
+  - EXplaing value of analysis to client base of educators, job seekers amd employers
+- The dataset for the model can be downloaded from [link] (https://www.dropbox.com/sh/2ktulat3b9gkz1g/AADAg4kVKHxEmxecqhe8lJ2Na?dl=0)
+
+#### Required Packages
+
+Following packages are required for the code to run efficiently.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+library(openxlsx)
+library(ggplot2)
+library(sqldf)
+library(plyr)
+library(MASS)
+library(climtrends)
+
+```
+
+#### Preliminary Analysis
+
+For the code to execute, all the datasets should be in the R working directory. There were multiple datasets so I performed following check to ensure data sets are same. 
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+jobs_xlsx <- read.xlsx("IT_Sample_10K.xlsx", sheet = 1)
+skills_xlsx <- read.xlsx("IT_Sample_10K.xlsx", sheet = 2)
+
+jobs_txt <- read.csv("jobs.txt", sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+skills_txt <- read.csv("skills.txt", sep = "\t", header = TRUE, stringsAsFactors = FALSE)
+
+identical(skills_xlsx, skills_txt)
+identical(jobs_xlsx, jobs_txt)
+all.equal(jobs_xlsx, jobs_txt)
+
+for(row in 1:dim(jobs_txt)[1]){
+  if(jobs_xlsx[row, 'Experience'] != jobs_txt[row, 'Experience']){
+    print(paste(row, jobs_xlsx[row, 'Experience'], jobs_txt[row, 'Experience'], sep = ", "))
+  }
+}
+
+for(row in 1:dim(jobs_txt)[1]){
+  if(jobs_xlsx[row, 'Salary'] != jobs_txt[row, 'Salary']){
+    print(paste(row, jobs_xlsx[row, 'Salary'], jobs_txt[row, 'Salary'], sep = ", "))
+  }
+}
+```
+
+Having confirmed that both datasets are same. We can start our analysis.
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+jobs <- read.csv("jobs.txt", sep = "\t", header = TRUE, stringsAsFactors = TRUE)
+skills <- read.csv("skills.txt", sep = "\t", header = TRUE, stringsAsFactors = TRUE)
+```
+- The data set under consideration has a total of **`r nrow(jobs)`** rows and **`r ncol(jobs)-1`** independent variables. Our dependent variable is *TTF (Time To Fill)* and is a smooth continuous variable with potential outliers. We can do outliers checks like [Grubb's Test](http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h1.htm) or [Tietjen-Moore Test](http://www.itl.nist.gov/div898/handbook/eda/section3/eda35h2.htm) if we see potential bias in the model 
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide'}
+par(mfrow = c(1, 2))
+plot(jobs[order(jobs$TTF), 'TTF'], ylab = 'Time To Fill (days)', main = 'Plot Of Dependent Variable TTF')
+boxplot(jobs$TTF, ylab = 'Time To Fill (days)', main = 'Boxplot of Dependent Variable TTF')
+```
+
+- Independent Variables are as follows
+  1. *BGTJobID*: Unique Indentifier for the data
+  2. *Title*: Job Title as read from the posting
+		+ There are `r length(levels(as.factor(jobs$Title)))` unique job titles. No use of converting them to dummies. As they seemed to be almost unique. Maximum a title was repeated was `r max(table(jobs$Title))`. Too less compared dataset size of `r dim(jobs)[1]` to create a dummy.
+3. *ONET_Code*: Occupation classification code according to the Bureau of Labor Statistics system
+		+ There are `r length(levels(as.factor(jobs$ONET_Code)))` different codes. We might need to create dummy variables for them.
+		+ The code names are `r unique(jobs$ONET_CODE)`.
+  4. *ONET_Name*: Occupation Name according to the Bureau of Labor Statistics system
+		+ There are `r length(levels(as.factor(jobs$ONET_Name)))` different names. We might need to create dummy variables for them.
+		+ The names are `r unique(jobs$ONET_Name)`.	
+		+ There are exactly same number of codes as names. Infact for a code there is unique name and viceversa.
+		+ We would need to consider only of them for our analysis
+  5. *BGTOcc_Code*: Occupation classification code according to the Burning Glass Occupation code
+		+ There are `r length(levels(as.factor(jobs$BGTOcc_Code)))` different codes. We might need to create dummy variables for them.
+		+ The code names are `r unique(jobs$BGTOCC_CODE)`.
+  6. *BGTOcc_Name*: Occupation Name according to the Burning Glass Occupation System
+		+ There are `r length(levels(as.factor(jobs$BGTOcc_Name)))` different names. We might need to create dummy variables for them.
+		+ The names are `r unique(jobs$BGTOcc_Name)`.	
+		+ There are exactly same number of codes as names. Infact for a code there is unique name and viceversa.
+		+ We would need to consider only of them for our analysis
+  7. *Employer*: Employer Name.
+    + There are `r length(levels(as.factor(jobs$Employer)))` different names. We might need to create dummy variables for them. 
+    + Jobs where employer = NA typically are posted by recruiters
+  8. *Sector_Code*: 2-digit code for the Industry Sector of the Employer based on the NAICS Classification System
+		+ There are `r length(levels(as.factor(jobs$Sector_Code)))` different codes. We might need to create dummy variables for them.
+		+ The code names are `r unique(jobs$Sector_Name)`
+9. *Sector_Name*: 2-digit code for the Industry Sector of the Employer based on the NAICS Classification System
+		+ There are `r length(levels(as.factor(jobs$Sector_Code)))` different names. We might need to create dummy variables for them.
+		+ The names are `r unique(jobs$Sector_Name)`.
+		+ We would need to consider only of them for our analysis
+10. *Edu*: Minimum education requirement in years (e.g. Bachelors = 16)
+		+ There are `r length(levels(as.factor(jobs$Edu)))` unique job titles. We might need to create dummy variables for them.
+		+ The code names are `r unique(jobs$Edu)`.
+11. *BA*: Dummy variable where 1 indicates bachelor's degree or higher is required and 0 indicates not required
+12. *Experience*: Minimum experience requirement in months
+		+ There are `r length(levels(as.factor(jobs$Experience)))` unique experience months. We might need to create dummy variables for them.
+		+ The code names are `r unique(jobs$Experience)`.
+13. *State_Code*: Name of the State
+	+ There are `r length(levels(as.factor(jobs$State)))` unique states. We might need to create dummy variables for them.
+	+ The code names are `r unique(jobs$State)`.
+14. *MSA_Name*: Metropolitan Statistical Area where the job is located
+	+ There are `r length(levels(as.factor(jobs$MSA_Name)))` unique names. We might need to create dummy variables for them.
+15. *Salary*: Advertised annual salary
+		+ Discrete Variable with missing data denoted by 'na'
+16. *Skill_Name*: Each job posting has multiple skill names that could be gathered from skills.txt
+
+
+### Exploratory Data Analysis
+
+  **1.ONET_Names**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+ggplot(jobs, aes(x = ONET_Name)) + geom_bar() + xlab('ONET Names') + ylab('Frequency') +
+ggtitle('Frequency of TTF for ONET Names') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+
+ggplot(jobs, aes(x = ONET_Name, y = TTF)) + geom_boxplot() + xlab('ONET Names') + ylab('TTF') +
+ggtitle('Boxplot of TTF for ONET Names') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+
+  **2. BGTOcc_Names**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+ggplot(jobs, aes(x = BGTOcc_Name)) + geom_bar() + xlab('BGTOcc Names') + ylab('Frequency') +
+ggtitle('Frequency of TTF for BGTOcc Names') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+
+ggplot(jobs, aes(x = BGTOcc_Name, y = TTF)) + geom_boxplot() + xlab('BGTOcc Names') + ylab('TTF') +
+ggtitle('Boxplot of TTF for BGTOcc Names') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+  
+  **3. Sector_Name**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+ggplot(jobs, aes(x = Sector_Name)) + geom_bar() + xlab('Sector Names') + ylab('Frequency') +
+ggtitle('Frequency of TTF for Sector Names') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+
+ggplot(jobs, aes(x = Sector_Name, y = TTF)) + geom_boxplot() + xlab('Sector Names') + ylab('TTF') +
+ggtitle('Boxplot of TTF for Sector Names') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+
+  **4. Education**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+ggplot(jobs, aes(x = Edu)) + geom_bar() + xlab('Education') + ylab('Frequency') +
+ggtitle('Frequency of TTF for Education') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+
+ggplot(jobs, aes(x = Edu, y = TTF)) + geom_boxplot() + xlab('Education') + ylab('TTF') +
+ggtitle('Boxplot of TTF for Education') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+
+  **5. Experience**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+ggplot(jobs, aes(x = Experience)) + geom_bar() + xlab('Experience') + ylab('Frequency') +
+ggtitle('Frequency of TTF for Experience') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+ggplot(jobs, aes(x = Experience, y = TTF)) + geom_boxplot() + xlab('Experience') + ylab('TTF') +
+ggtitle('Boxplot of TTF for Experience') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+  - The one with experience 0.0799, 0.33000, 0.41999, 0.6700 seem to be an error so we change the experience values of them to "na"
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+levels(jobs$Experience)[1:6] <- c("na", "0.25", "na", "na", "0.5", "na")
+```
+  **6. State**
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+ggplot(jobs, aes(x = State_Code)) + geom_bar() + xlab('State') + ylab('Frequency') +
+ggtitle('Frequency of TTF for State') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+ggplot(jobs, aes(x = State_Code, y = TTF)) + geom_boxplot() + xlab('State') + ylab('TTF') +
+ggtitle('Boxplot of TTF for State') +  theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+
+  **7. Employer**
+  
+  - Since there are lot of employers and many of them have very few jobs. I have categorized them following way to extract more information from them -  1 Job (Has been listed only once), 2 to 10 JObs (Has been listed 2 to 10 times),
+  11 to 50 Jobs (Has been listed 11 to 50 times) and rest ahve their original name
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+par(mfrow = c(1, 2))
+employer_names <- rownames(table(jobs$Employer))
+new_employer_names <- employer_names
+new_employer_names[which(as.numeric(table(jobs$Employer)) == 1)] <- "1JOb"
+new_employer_names[which(as.numeric(table(jobs$Employer)) > 1 & as.numeric(table(jobs$Employer)) <= 10)] <- "2to10Jobs"
+new_employer_names[which(as.numeric(table(jobs$Employer)) > 10 & as.numeric(table(jobs$Employer)) <= 50)] <- "11to50Jobs"
+employer_names <- data.frame(employer_names, new_employer_names)
+
+jobs <- cbind(jobs, sqldf("SELECT new_employer_names
+                            FROM jobs
+                            INNER JOIN employer_names ON jobs.Employer = employer_names.employer_names"))
+colnames(jobs)[length(colnames(jobs))] <- "Employer_New"
+
+y <- table(jobs$Employer)
+ggplot(data.frame(y), aes(x = Var1, y = Freq)) + geom_point() + xlab('Employer') + ylab('Frequency') +
+ggtitle('Frequency of Employers') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 5),
+                                                   axis.text.y = element_text(size = 15))
+
+y <- table(jobs$Employer_New)
+ggplot(data.frame(y), aes(x = Var1, y = Freq)) + geom_point() + xlab('Employer_New') + ylab('Frequency') +
+ggtitle('Frequency of Employers_New') + theme(title = element_text(size = 25),
+                                                   axis.title.x = element_text(size = 20),
+                                                   axis.title.y = element_text(size = 20),
+                                                   axis.text.x = element_text(angle = 90, hjust = 1, size = 15),
+                                                   axis.text.y = element_text(size = 15))
+```
+Overall all the Boxplots indicate that there is substantial variation within each category of the Independent Variables. Also Some categories seem to have more higher TTF values.
+
+### Data Preparation
+
+1. Skills
+  - As a given job could have multiple skills and a given skill could be in any number of Jobs. We would need to create dummy variable for each of the skill name before we can do analysis
+  
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+skill_names <- as.character(unique(skills$Skill_Name))
+skill_names_shrt <- aaply(skill_names, 1, function(x){
+  x <- gsub("'", "", x)
+  return(gsub(" ", "", x))
+})
+skills$Skill_Name <- aaply(as.character(skills$Skill_Name), 1, function(x){
+  x <- gsub("'", "", x)
+  return(gsub(" ", "", x))
+})
+skills_df <- data.frame(matrix(NA, nrow = dim(jobs)[1], ncol = (length(skill_names) + 1)))
+colnames(skills_df) <- c("ID", paste("skill_", skill_names_shrt, sep = ""))
+
+for(skill in skill_names_shrt){
+  id <- sqldf(paste("SELECT BGTJobID
+                                FROM skills
+                                WHERE Skill_Name = '", as.character(skill), "'", sep = ""))
+  id_present <- match(jobs$BGTJobId, id$BGTJobId)
+  dummy <- rep(1, length(id_present))
+  dummy[is.na(id_present)] <- 0
+  skills_df[ ,paste("skill_", skill, sep = "")] <- dummy
+}
+skills_df[ ,'ID'] <- jobs$BGTJobId
+```
+
+2. Factor Variables
+  - All the other independent variables have multiple categories. We need to convert each of those categories into dummy variables
+  
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+
+fac_var <- c("ONET_Name", "BGTOcc_Name", "Sector_Name", "Edu", "BA", "Experience", "State_Code", "Salary", "Employer_New")
+
+for(var in fac_var){
+  print(var)
+  jobs[ ,var] <- as.factor(jobs[ ,var])
+}
+
+dumm_var <- fac_var
+
+for(dumm in dumm_var){
+  dumm_data <- model.matrix( ~ jobs[ ,dumm] - 1, data = jobs)
+  colnames(dumm_data) <- paste(dumm, gsub("jobs|, dumm|[^.[:^punct:]]", "", colnames(dumm_data), perl = T), sep = "_")
+  jobs <- cbind(jobs, dumm_data)
+}
+
+colnames(jobs) <- gsub(" ", "", colnames(jobs))
+```
+
+3. We need to add combine both the above dataframes and remove unncessary columns before moving forward with analysis
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE, results = 'hide', fig.width = 16, fig.height = 12}
+
+data <- sqldf("SELECT j.*, s.*
+               FROM jobs as j
+               INNER JOIN skills_df as s on j.BGTJobId = s.ID")
+
+```
